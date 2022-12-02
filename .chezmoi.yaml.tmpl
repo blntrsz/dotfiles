@@ -1,6 +1,9 @@
 {{- $type := promptStringOnce . "type" "personal or work type" -}}
 {{- $email := promptStringOnce . "email" "Email address" -}}
 {{- $vercel_token := promptStringOnce . "vercel_token" "Vercel Token" -}}
+{{- $insomnia_token_local := promptStringOnce . "insomnia_token_local" "Insomnia Local Token" -}}
+{{- $insomnia_token_staging := promptStringOnce . "insomnia_token_staging" "Insomnia Staging Token" -}}
+{{- $insomnia_token_preprod := promptStringOnce . "insomnia_token_preprod" "Insomnia Preprod Token" -}}
 
 data:
   name: "Balint Orosz"
@@ -8,5 +11,10 @@ data:
   type: {{ $type | quote }}
   vercel:
     token: {{ $vercel_token | quote }}
+  insomnia:
+    token:
+      local: {{ $insomnia_local_token | quote }}
+      staging: {{ $insomnia_staging_token | quote }}
+      preprod: {{ $insomnia_preprod_token | quote }}
 git:
   autoPush: true

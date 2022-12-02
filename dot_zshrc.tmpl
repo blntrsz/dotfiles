@@ -108,6 +108,12 @@ alias v='vim'
 alias vim='nvim'
 alias aws-exec="aws-vault exec my-aws-account --"
 alias c="chezmoi"
+alias lg="lazygit"
+alias ibrew="arch -x86_64 /usr/local/bin/brew"
+alias aws-sandbox="aws-vault exec dil-all-sandbox --"
+alias insomnia_local="API_TOKEN={{ .insomnia.token.local }} /Applications/Insomnia.app/Contents/MacOS/Insomnia"
+alias insomnia_staging="API_TOKEN={{ .insomnia.token.staging }} /Applications/Insomnia.app/Contents/MacOS/Insomnia"
+alias insomnia_preprod="API_TOKEN={{ .insomnia.token.preprod }} /Applications/Insomnia.app/Contents/MacOS/Insomnia"
 
 {{ if eq .type "personal" }}
 export AWS_VAULT_BACKEND=pass

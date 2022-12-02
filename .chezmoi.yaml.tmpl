@@ -13,8 +13,8 @@ data:
     token: {{ $vercel_token | quote }}
   insomnia:
     token:
-      local: {{ $insomnia_local_token | quote }}
-      staging: {{ $insomnia_staging_token | quote }}
-      preprod: {{ $insomnia_preprod_token | quote }}
+      local: {{ $insomnia_token_local | quote }}
+      staging: {{ $insomnia_token_staging | quote }}
+      preprod: {{ $insomnia_token_preprod | quote }}
 git:
   autoPush: true

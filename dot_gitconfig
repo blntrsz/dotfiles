@@ -1,0 +1,7 @@
+[user]
+	name = Balint Orosz
+	email = borosz@diligent.com
+[core]
+	excludesfile = ~/.gitignore
+[init]
+	defaultBranch = main

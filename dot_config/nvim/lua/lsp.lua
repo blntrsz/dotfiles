@@ -17,7 +17,6 @@ local lsp = {
   tailwindcss = {},
   cssls = {},
   astro = {},
-  gopls = {}
 }
 
 cmp.setup({

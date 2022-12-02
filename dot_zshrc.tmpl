@@ -109,11 +109,12 @@ alias vim='nvim'
 alias aws-exec="aws-vault exec my-aws-account --"
 alias c="chezmoi"
 
-
+{{ if eq .data.type "personal" }}
 export AWS_VAULT_BACKEND=pass
 export AWS_VAULT_PASS_PASSWORD_STORE_DIR=/root/.password-store/aws-vault
 export PATH=$PATH:$HOME/.tfenv/bin
 export VERCEL_API_TOKEN="{{ .vercel.token }}"
+{{ end }}
 
 # vi mode
 bindkey -v

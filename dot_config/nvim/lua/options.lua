@@ -1,4 +1,4 @@
--- vim.cmd [[colorscheme catppuccin]]
+vim.cmd [[colorscheme catppuccin]]
 vim.g.catppuccin_flavour = "mocha"
 
 -- Utils
@@ -41,7 +41,7 @@ opt.inccommand = 'split'
 opt.ignorecase = true -- Case insensitive searching UNLESS /C or capital in search
 opt.smarttab = true
 opt.breakindent = true
-opt.wrap = false -- No Wrap lines
+opt.wrap = true
 opt.backspace = { 'start', 'eol', 'indent' }
 opt.path:append { '**' } -- Finding files - Search down into subfolders
 opt.wildignore:append { '*/node_modules/*' }

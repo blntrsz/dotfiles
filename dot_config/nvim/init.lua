@@ -1,5 +1,5 @@
 vim.defer_fn(function()
-	pcall(require, "impatient")
+  pcall(require, "impatient")
 end, 0)
 
 -- options should be first
@@ -11,5 +11,3 @@ require "plugins"
 -- then everything else
 require "mappings"
 require "lsp"
-require "autocmds"
-

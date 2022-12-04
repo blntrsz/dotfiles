@@ -14,10 +14,15 @@ local lsp = {
 			},
 		},
 	},
-	tsserver = {},
+	tsserver = {
+		root_dir = nvim_lsp.util.root_pattern("package.json"),
+	},
 	tailwindcss = {},
 	cssls = {},
 	astro = {},
+	denols = {
+		root_dir = nvim_lsp.util.root_pattern("deno.json"),
+	},
 }
 
 cmp.setup({

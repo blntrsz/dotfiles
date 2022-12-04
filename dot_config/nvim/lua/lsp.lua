@@ -85,12 +85,6 @@ for k, v in pairs(lsp) do
 end
 
 null_ls.setup({
-	on_attach = function(client)
-		if client.server_capabilities.documentFormattingProvider then
-			-- format on save
-			vim.cmd("autocmd BufWritePost * lua vim.lsp.buf.format({ async = true })")
-		end
-	end,
 	sources = {
 		null_ls.builtins.formatting.stylua,
 		null_ls.builtins.code_actions.eslint_d,

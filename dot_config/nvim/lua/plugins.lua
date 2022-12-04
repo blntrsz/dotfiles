@@ -227,8 +227,10 @@ return require("packer").startup(function(use)
 		end,
 	})
 
-	-- Prettier & Eslint
-	use("jose-elias-alvarez/null-ls.nvim")
+	use({
+    "jose-elias-alvarez/null-ls.nvim",
+		requires = "ThePrimeagen/refactoring.nvim"
+  })
 
 	use({
 		"folke/todo-comments.nvim",
@@ -267,13 +269,6 @@ return require("packer").startup(function(use)
 			"nvim-lua/plenary.nvim",
 			"nvim-treesitter/nvim-treesitter",
 			"antoinemadec/FixCursorHold.nvim",
-		},
-	})
-	use({
-		"ThePrimeagen/refactoring.nvim",
-		requires = {
-			{ "nvim-lua/plenary.nvim" },
-			{ "nvim-treesitter/nvim-treesitter" },
 		},
 	})
 

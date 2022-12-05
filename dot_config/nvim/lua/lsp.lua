@@ -20,9 +20,9 @@ local lsp = {
 	tailwindcss = {},
 	cssls = {},
 	astro = {},
-	denols = {
-    root_dir = lspconfig.util.root_pattern("deno.json"),
-	},
+	-- denols = {
+ --    root_dir = lspconfig.util.root_pattern("deno.json"),
+	-- },
 }
 
 cmp.setup({

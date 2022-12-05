@@ -160,7 +160,7 @@ export NVM_DIR="$HOME/.nvm"
 
 # == FNM ==
 
-eval "$(fnm env --use-on-cd)"
+command -v fnm && eval "$(fnm env --use-on-cd)"
 
 # == TMUX ==
 

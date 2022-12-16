@@ -20,14 +20,13 @@ lvim.colorscheme = "lunar"
 lvim.leader = "space"
 -- add your own keymapping
 lvim.keys.normal_mode["<C-s>"] = ":w<cr>"
-vim.keymap.set("v", "J", ":m '>+1<CR>gv=gv")
-vim.keymap.set("v", "K", ":m '<-2<CR>gv=gv")
-
-vim.keymap.set("n", "J", "mzJ`z")
-vim.keymap.set("n", "<C-d>", "<C-d>zz")
-vim.keymap.set("n", "<C-u>", "<C-u>zz")
-vim.keymap.set("n", "n", "nzzzv")
-vim.keymap.set("n", "N", "Nzzzv")
+lvim.keys.visual_mode["J"] = ":m '>+1<CR>gv=gv"
+lvim.keys.visual_mode["K"] = ":m '<-2<CR>gv=gv"
+lvim.keys.normal_mode["J"] = "mzJ`z"
+lvim.keys.normal_mode["<C-d>"] = "<C-d>zz"
+lvim.keys.normal_mode["<C-u>"] = "<C-u>zz"
+lvim.keys.normal_mode["n"] = "nzzzv"
+lvim.keys.normal_mode["N"] = "Nzzzv"
 
 -- greatest remap ever
 vim.keymap.set("x", "<leader>p", "\"_dP")

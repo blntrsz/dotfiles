@@ -48,6 +48,29 @@ lvim.keys.normal_mode["<leader>j"] = "<cmd>lprev<CR>zz"
 lvim.keys.normal_mode["<leader>s"] = ":%s/\\<<C-r><C-w>\\>/<C-r><C-w>/gI<Left><Left><Left>"
 vim.keymap.set("n", "<leader>x", "<cmd>!chmod +x %<CR>", { silent = true })
 
+-- Harpoon
+local harpoon_ui = require("harpoon.ui")
+
+vim.keymap.set("n", "<leader>hh", function()
+  require("harpoon.mark").add_file()
+end)
+vim.keymap.set("n", "<leader>ha", function()
+  harpoon_ui.toggle_quick_menu()
+end)
+
+vim.keymap.set("n", "<leader>h1", function()
+  harpoon_ui.nav_file(1)
+end)
+vim.keymap.set("n", "<leader>h2", function()
+  harpoon_ui.nav_file(2)
+end)
+vim.keymap.set("n", "<leader>h3", function()
+  harpoon_ui.nav_file(3)
+end)
+vim.keymap.set("n", "<leader>h4", function()
+  harpoon_ui.nav_file(4)
+end)
+
 -- TODO: User Config for predefined plugins
 -- After changing plugin config exit and reopen LunarVim, Run :PackerInstall :PackerCompile
 lvim.builtin.alpha.active = false

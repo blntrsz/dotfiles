@@ -171,6 +171,9 @@ linters.setup {
 lvim.plugins = {
   {
     "ThePrimeagen/harpoon",
+    config = function()
+      require("harpoon").setup()
+    end
   },
   {
     "nvim-treesitter/nvim-treesitter-context",

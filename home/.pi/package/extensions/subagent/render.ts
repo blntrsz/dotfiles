@@ -1,5 +1,5 @@
 import { keyText, type Theme } from "@earendil-works/pi-coding-agent";
-import { Text, truncateToWidth } from "@earendil-works/pi-tui";
+import { Text, truncateToWidth, type Component } from "@earendil-works/pi-tui";
 import type { ExecutionSnapshot } from "./domain.ts";
 
 function tokens(value: number): string {
@@ -82,6 +82,20 @@ export function cardText(snapshot: ExecutionSnapshot, expanded: boolean, theme: 
 
 export function renderCard(snapshot: ExecutionSnapshot, expanded: boolean, theme: Theme): Text {
   return new Text(cardText(snapshot, expanded, theme), 0, 0);
+}
+
+/** A transcript/tool component that reads the latest projection on every paint. */
+export function renderLiveCard(
+  snapshot: () => ExecutionSnapshot,
+  expanded: boolean,
+  theme: Theme,
+): Component {
+  return {
+    render(width: number): string[] {
+      return new Text(cardText(snapshot(), expanded, theme), 0, 0).render(width);
+    },
+    invalidate() {},
+  };
 }
 
 export function fleetLines(snapshots: readonly ExecutionSnapshot[], width: number, theme: Theme): string[] {

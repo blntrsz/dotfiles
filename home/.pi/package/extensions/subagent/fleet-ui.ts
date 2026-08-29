@@ -198,7 +198,7 @@ export class SubagentFleetUi {
     this.tui?.requestRender();
   }
 
-  private handleInput(data: string): { consume?: boolean; data?: string } | undefined {
+  handleInput(data: string): { consume?: boolean; data?: string } | undefined {
     if (isKeyRelease(data) || this.inspectorOpen) return undefined;
     if (matchesKey(data, "ctrl+alt+f" as Parameters<typeof matchesKey>[1])) {
       void this.openInspector(this.snapshots[Math.max(0, this.selected - 1)]?.executionId);

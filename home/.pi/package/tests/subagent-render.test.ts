@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import type { ExecutionSnapshot } from "../extensions/subagent/domain.ts";
-import { FleetInspector } from "../extensions/subagent/fleet-ui.ts";
-import { cardText, fleetLines, renderCard } from "../extensions/subagent/render.ts";
+import { FleetInspector, SubagentFleetUi } from "../extensions/subagent/fleet-ui.ts";
+import { cardText, fleetLines, renderCard, renderLiveCard } from "../extensions/subagent/render.ts";
 import type { RunStore } from "../extensions/subagent/run-store.ts";
 
 const theme = {
@@ -64,6 +64,22 @@ void test("collapsed FleetView matches the pi-subagents inspect affordance", () 
   assert.match(lines[0] ?? "", /↓\/← to inspect/);
 });
 
+void test("live transcript cards repaint from the latest RunStore projection", () => {
+  let current = snapshot();
+  const card = renderLiveCard(() => current, false, theme);
+  assert.ok(card.render(100).some((line) => line.includes("running") || line.includes("using read")));
+  current = snapshot({
+    childState: "closed",
+    executionState: "succeeded",
+    activity: "completed",
+    completion: { sequence: 1, childId: "ch_1", executionId: "ex_1", status: "succeeded", text: "done", committedAt: 2 },
+  });
+  const refreshed = card.render(100).join("\n");
+  assert.match(refreshed, /✓ reviewer/);
+  assert.match(refreshed, /completed/);
+  assert.doesNotMatch(refreshed, /using read/);
+});
+
 void test("Fleet inspector uses the reference two-pane live layout", () => {
   const store = {
     list: () => [snapshot()],
@@ -80,6 +96,43 @@ void test("Fleet inspector uses the reference two-pane live layout", () => {
   assert.match(lines.at(-2) ?? "", /agent.*scroll.*refresh.*close/);
   assert.ok(lines.every((line) => visibleWidth(line) <= 100));
   inspector.dispose();
+});
+
+void test("Fleet roster activates from the empty editor and opens the selected inspector", async () => {
+  let widget: ((tui: never, theme: Theme) => { render(width: number): string[] }) | undefined;
+  let inspectorOpened = 0;
+  const ctx = {
+    ui: {
+      onTerminalInput: () => () => undefined,
+      setWidget: (_key: string, content: typeof widget) => { widget = content; },
+      getEditorText: () => "",
+      custom: async (factory: (tui: never, theme: Theme, keys: never, done: (value: undefined) => void) => { dispose?(): void }) => {
+        inspectorOpened += 1;
+        let done!: (value: undefined) => void;
+        const completion = new Promise<undefined>((resolve) => { done = resolve; });
+        const component = factory({ requestRender() {} } as never, theme, {} as never, done);
+        done(undefined);
+        await completion;
+        component.dispose?.();
+      },
+    },
+  } as unknown as ExtensionContext;
+  const store = {
+    list: () => [snapshot()],
+    subscribe(listener: (runs: readonly ExecutionSnapshot[]) => void) {
+      listener([snapshot()]);
+      return () => undefined;
+    },
+  } as unknown as RunStore;
+  const fleet = new SubagentFleetUi(ctx, store);
+  assert.equal(fleet.handleInput("\x1b[B")?.consume, true);
+  const activeLines = widget?.({ requestRender() {} } as never, theme).render(100) ?? [];
+  assert.ok(activeLines.some((line) => line.includes("select · enter inspect")));
+  assert.equal(fleet.handleInput("\x1b[B")?.consume, true);
+  assert.equal(fleet.handleInput("\r")?.consume, true);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(inspectorOpened, 1);
+  fleet.dispose();
 });
 
 void test("card and FleetView render within narrow terminal widths", () => {

@@ -9,7 +9,7 @@ import { Type, type Static } from "typebox";
 import { childToolCeiling } from "./capabilities.ts";
 import { SubagentError, type Completion, type ContextMode, type ExecutionSnapshot } from "./domain.ts";
 import { SubagentFleetUi } from "./fleet-ui.ts";
-import { renderCard } from "./render.ts";
+import { renderCard, renderLiveCard } from "./render.ts";
 import { ChildRegistry, type LaunchRequest } from "./registry.ts";
 import { RunController, RunStore } from "./run-store.ts";
 import { canonicalModelRuntime, PiChildSessionFactory } from "./sdk-adapter.ts";
@@ -151,8 +151,15 @@ export default function subagentExtension(pi: ExtensionAPI) {
   });
   pi.registerEntryRenderer("subagent-launch", (entry, { expanded }, theme) => {
     const data = entry.data as { executionId: string };
-    try { return renderCard(runtime().store.lookup(data.executionId), expanded, theme); }
-    catch { return new Text(theme.fg("dim", `Subagent ${data.executionId}`), 0, 0); }
+    try {
+      const initial = runtime().store.lookup(data.executionId);
+      return renderLiveCard(() => {
+        try { return runtime().store.lookup(data.executionId); }
+        catch { return initial; }
+      }, expanded, theme);
+    } catch {
+      return new Text(theme.fg("dim", `Subagent ${data.executionId}`), 0, 0);
+    }
   });
 
   pi.on("session_start", async (_event, ctx) => {
@@ -276,7 +283,12 @@ export default function subagentExtension(pi: ExtensionAPI) {
     renderResult(result, { expanded }, theme) {
       const details = result.details as { snapshot?: ExecutionSnapshot } | ExecutionSnapshot | undefined;
       const snapshot = details && "executionId" in details ? details : details?.snapshot;
-      if (snapshot) return renderCard(snapshot, expanded, theme);
+      if (snapshot) {
+        return renderLiveCard(() => {
+          try { return runtime().store.lookup(snapshot.executionId); }
+          catch { return snapshot; }
+        }, expanded, theme);
+      }
       const block = result.content.find((part) => part.type === "text");
       return new Text(block?.type === "text" ? block.text : "", 0, 0);
     },

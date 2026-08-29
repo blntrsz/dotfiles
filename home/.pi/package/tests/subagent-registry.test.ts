@@ -286,6 +286,22 @@ void test("shutdown closes admission, rejects waiters, discards delivery, dispos
   assert.notEqual(retained.activity, "late mutation");
 });
 
+void test("shutdown during construction disposes a Child that arrives after logical release", async () => {
+  const construction = deferred<ChildSession>();
+  const session = new ControlledSession();
+  const registry = new ChildRegistry({
+    factory: { create: async () => construction.promise },
+    delivery: { inject() {} },
+    shutdownMs: 0,
+  });
+  const { executionId } = registry.launch({ task: "work", cwd: "/tmp", model: "test/model", thinkingLevel: "off", tools: [] });
+  await registry.shutdown();
+  construction.resolve(session);
+  await tick();
+  assert.equal(session.disposed, true);
+  assert.equal(registry.inspect(executionId).executionState, "cancelled");
+});
+
 void test("cleanup diagnostics are retained without preventing logical settlement", async () => {
   const session = new ControlledSession();
   session.dispose = () => { session.disposed = true; throw new Error("dispose exploded"); };
@@ -320,6 +336,36 @@ void test("published event data is detached, deeply immutable, and JSON-safe", a
   assert.equal(Object.isFrozen(data), true);
   assert.equal(Object.isFrozen(data.nested), true);
   assert.doesNotThrow(() => JSON.stringify(h.inspect(executionId)));
+});
+
+void test("one-shot and reusable executions classify task-start failures identically", async () => {
+  const registry = new ChildRegistry({
+    factory: {
+      async create() {
+        return {
+          async start() { throw new Error("start exploded"); },
+          async steer() {}, async followUp() {}, async abort() {}, dispose() {},
+        };
+      },
+    },
+    delivery: { inject() {} },
+    schedule: () => undefined,
+  });
+  const request = { task: "work", cwd: "/tmp", model: "test/model", thinkingLevel: "off", tools: [] };
+
+  const oneShot = registry.launch(request);
+  await tick();
+  const reusable = registry.createReusable(request, new AbortController().signal);
+  await assert.rejects(reusable.execute("work"), (error: unknown) =>
+    error instanceof SubagentError && error.code === "child-execution-failed"
+  );
+
+  for (const execution of [registry.inspect(oneShot.executionId), registry.list().at(-1)!]) {
+    assert.equal(execution.executionState, "failed");
+    assert.equal(execution.completion?.error?.code, "child-execution-failed");
+    assert.match(execution.completion?.diagnosticExcerpt ?? "", /start exploded/);
+  }
+  await reusable.close();
 });
 
 void test("terminal inspection projections stay within 256 KiB with explicit omissions", async () => {

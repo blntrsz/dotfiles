@@ -345,12 +345,14 @@ void test("the production backend preserves one Child conversation and forwards 
   assert.equal(executions[1]?.childState, "idle");
   assert.equal(executions[0]?.handleId, executions[1]?.handleId);
   assert.equal(executions[1]?.handleState, "idle");
+  assert.equal(executions.flatMap((execution) => execution.events).filter((event) => event.type === "child-created").length, 1);
   await child.close();
   assert.deepEqual(resolved, { label: "worker", model: "test/model", skills: ["one", "two"] });
   assert.equal(disposed, 1);
 });
 
-void test("missing Child text is retained as a typed failed Execution", async () => {
+void test("missing Child text settles and releases a reusable Execution as a failure", async () => {
+  let disposed = 0;
   const registry = new ChildRegistry({
     delivery: { inject() {} },
     schedule: () => undefined,
@@ -358,7 +360,7 @@ void test("missing Child text is retained as a typed failed Execution", async ()
       async create() {
         return {
           async start() { return { status: "succeeded", text: "   " } as const; },
-          async steer() {}, async followUp() {}, async abort() {}, dispose() {},
+          async steer() {}, async followUp() {}, async abort() {}, dispose() { disposed += 1; },
         };
       },
     },
@@ -372,6 +374,11 @@ void test("missing Child text is retained as a typed failed Execution", async ()
   const execution = registry.list()[0];
   assert.equal(execution?.executionState, "failed");
   assert.equal(execution?.completion?.error?.code, "child-missing-text");
+  assert.equal(execution?.childState, "closed");
+  assert.equal(disposed, 1);
+  await assert.rejects(child.execute("again"), (error: unknown) =>
+    error instanceof SubagentError && error.code === "workflow-cancelled"
+  );
   await child.close();
 });
 

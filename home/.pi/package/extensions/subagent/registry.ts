@@ -96,6 +96,7 @@ interface RecordState {
   pendingControls: number;
   provisional?: AdapterCompletion;
   cancelRequested: boolean;
+  slotHeld: boolean;
   retained: boolean;
   consumeOnCompletion?: boolean;
   reusable?: ReusableState;
@@ -186,32 +187,7 @@ export class ChildRegistry {
         this.assertOpen();
         if (state.closed || signal.aborted) throw new SubagentError("workflow-cancelled", "Workflow Child is closed");
         if (state.active) throw new SubagentError("workflow-handle-busy", "Workflow Child is already executing");
-        if (!task.trim()) throw new SubagentError("invalid-arguments", "Task must not be empty");
-        if (!state.reserved) {
-          if (this.liveChildren >= LIMITS.liveChildren) throw new SubagentError("capacity-rejected", "Subagent capacity is full; no work was admitted");
-          state.reserved = true;
-          this.liveChildren += 1;
-        }
-        if (this.nonterminalCount() >= LIMITS.nonterminalExecutions) {
-          throw new SubagentError("capacity-rejected", "Subagent capacity is full; no work was admitted");
-        }
-        for (const previous of state.records) {
-          if (previous.childState === "idle" && !previous.retained) {
-            previous.retained = true;
-            previous.activity = "retained in process history";
-            this.emit(previous, "execution-retained");
-          }
-        }
-        const record = this.makeRecord({ ...state.request, task }, state.childId);
-        record.consumeOnCompletion = true;
-        record.reusable = state;
-        state.active = record;
-        state.records.add(record);
-        this.records.set(record.executionId, record);
-        this.emit(record, "execution-admitted", { context: "fresh", reusable: true });
-        if (this.executing < LIMITS.executingChildren) void this.startReusable(record, state);
-        else this.queue.push(record);
-        this.publish();
+        const record = this.admit({ ...state.request, task }, state);
         const result = await this.wait(record.executionId, { signal });
         if (result.completion.status === "succeeded") return result.completion.text ?? "";
         throw new SubagentError(
@@ -242,21 +218,8 @@ export class ChildRegistry {
 
   launch(request: LaunchRequest): LaunchResult {
     this.assertOpen();
-    if (!request.task.trim()) throw new SubagentError("invalid-arguments", "Task must not be empty");
-    if (this.nonterminalCount() >= LIMITS.nonterminalExecutions || this.liveChildren >= LIMITS.liveChildren) {
-      throw new SubagentError("capacity-rejected", "Subagent capacity is full; no work was admitted");
-    }
-
-    const childId = this.identity("child");
-    const record = this.makeRecord(request, childId);
-    const executionId = record.executionId;
-    this.records.set(executionId, record);
-    this.liveChildren += 1;
-    this.emit(record, "execution-admitted", { context: request.context ?? "fresh" });
-
-    if (this.executing < LIMITS.executingChildren) void this.start(record);
-    else this.queue.push(record);
-    this.publish();
+    const record = this.admit(request);
+    const { childId, executionId } = record;
     return {
       childId,
       executionId,
@@ -330,8 +293,7 @@ export class ChildRegistry {
       record.activity = "cancelling queued execution";
       this.emit(record, "cancellation-requested");
       this.commit(record, { status: "cancelled", errorCode: "child-execution-failed", errorMessage: "Cancelled before Child construction" });
-      if (record.reusable) this.finishReusable(record, record.reusable, false);
-      else this.closeChild(record);
+      this.release(record, false);
       this.drain();
       return this.snapshot(record);
     }
@@ -358,8 +320,7 @@ export class ChildRegistry {
         errorCode: "cleanup-grace-exceeded",
         errorMessage: "Cleanup grace exceeded; logical cancellation committed. In-process work has no hard-kill guarantee.",
       });
-      if (record.reusable) this.finishReusable(record, record.reusable, false);
-      else this.closeChild(record);
+      this.release(record, false);
     }
     return this.snapshot(record);
   }
@@ -420,10 +381,44 @@ export class ChildRegistry {
       if (!record.completion) this.commit(record, { status: "cancelled", errorCode: "parent-closed", errorMessage: "Parent runtime closed" });
       if (record.deliveryState === "pending") record.deliveryState = "discarded";
       if (record.reusable) this.closeReusable(record.reusable);
-      else this.closeChild(record);
+      else this.release(record, false);
     }
     this.publish();
     this.listeners.clear();
+  }
+
+  private admit(request: LaunchRequest, reusable?: ReusableState): RecordState {
+    if (!request.task.trim()) throw new SubagentError("invalid-arguments", "Task must not be empty");
+    const reservesChild = !reusable?.reserved;
+    if (this.nonterminalCount() >= LIMITS.nonterminalExecutions || (reservesChild && this.liveChildren >= LIMITS.liveChildren)) {
+      throw new SubagentError("capacity-rejected", "Subagent capacity is full; no work was admitted");
+    }
+
+    if (reusable) {
+      for (const previous of reusable.records) {
+        if (previous.childState === "idle" && !previous.retained) {
+          previous.retained = true;
+          previous.activity = "retained in process history";
+          this.emit(previous, "execution-retained");
+        }
+      }
+      reusable.reserved = true;
+    }
+    if (reservesChild) this.liveChildren += 1;
+
+    const record = this.makeRecord(request, reusable?.childId ?? this.identity("child"));
+    if (reusable) {
+      record.consumeOnCompletion = true;
+      record.reusable = reusable;
+      reusable.active = record;
+      reusable.records.add(record);
+    }
+    this.records.set(record.executionId, record);
+    this.emit(record, "execution-admitted", { context: reusable ? "fresh" : request.context ?? "fresh", ...(reusable ? { reusable: true } : {}) });
+    if (this.executing < LIMITS.executingChildren) void this.start(record);
+    else this.queue.push(record);
+    this.publish();
+    return record;
   }
 
   private makeRecord(request: LaunchRequest, childId: string): RecordState {
@@ -451,115 +446,115 @@ export class ChildRegistry {
       followUpTail: Promise.resolve(),
       pendingControls: 0,
       cancelRequested: false,
+      slotHeld: false,
       retained: false,
     };
   }
 
-  private async startReusable(record: RecordState, state: ReusableState): Promise<void> {
-    if (this.closed || record.completion || record.cancelRequested || state.closed) return;
+  private async start(record: RecordState): Promise<void> {
+    const reusable = record.reusable;
+    if (this.closed || record.completion || record.cancelRequested || reusable?.closed) return;
     this.executing += 1;
+    record.slotHeld = true;
     record.childState = "executing";
     record.executionState = "running";
-    record.activity = state.session ? "working" : "constructing Child";
+    record.activity = reusable?.session ? "working" : "constructing Child";
     record.startedAt = this.now();
-    this.emit(record, "execution-started", { reusable: true });
+    this.emit(record, "execution-started", reusable ? { reusable: true } : undefined);
     this.publish();
-    try {
-      if (!state.session) {
-        state.session = await this.options.factory.create(
-          { ...state.request, task: record.request.task, childId: state.childId, executionId: record.executionId },
-          (type, data) => {
-            const active = state.active;
-            if (active) this.emitChildEvent(active, type, data);
-          },
+
+    let session = reusable?.session;
+    let childCreated = false;
+    if (!session) {
+      try {
+        session = await this.options.factory.create(
+          { ...record.request, childId: record.childId, executionId: record.executionId },
+          reusable
+            ? (type, data) => {
+                const active = reusable.active;
+                if (active) this.emitChildEvent(active, type, data);
+              }
+            : (type, data) => this.emitChildEvent(record, type, data),
         );
-        this.emit(record, "child-created", { reusable: true });
-      }
-      record.session = state.session;
-      if (record.cancelRequested || state.closed || this.closed) {
-        this.commit(record, { status: "cancelled", errorCode: "workflow-cancelled", errorMessage: "Workflow Child was cancelled before execution" });
-        this.finishReusable(record, state, false);
+        if (reusable) reusable.session = session;
+        childCreated = true;
+      } catch (error) {
+        this.fail(record, error, "child-startup-failed");
+        this.release(record, false);
         return;
       }
-      record.activity = "working";
-      record.provisional = await state.session.start(record.request.task);
+    }
+
+    record.session = session;
+    if (record.completion || this.closed || record.cancelRequested || reusable?.closed) {
+      if (!record.completion) {
+        this.commit(record, {
+          status: "cancelled",
+          errorCode: reusable ? "workflow-cancelled" : "child-execution-failed",
+          errorMessage: reusable
+            ? "Workflow Child was cancelled before execution"
+            : "Cancelled during Child construction; no task was started",
+        });
+      }
+      this.release(record, false);
+      return;
+    }
+
+    record.activity = "working";
+    if (childCreated) this.emit(record, "child-created", reusable ? { reusable: true } : undefined);
+    try {
+      record.provisional = await session.start(record.request.task);
       this.trySettle(record);
     } catch (error) {
-      if (!record.completion) {
-        const normalized = asSubagentError(error, state.session ? "child-execution-failed" : "child-startup-failed", record.executionId);
-        this.commit(record, { status: record.cancelRequested ? "cancelled" : "failed", errorCode: normalized.code, errorMessage: normalized.message });
-      }
-      this.finishReusable(record, state, false);
+      this.fail(record, error, "child-execution-failed");
+      this.release(record, false);
     }
   }
 
-  private async start(record: RecordState): Promise<void> {
-    if (this.closed || record.completion || record.cancelRequested) return;
-    this.executing += 1;
-    record.childState = "executing";
-    record.executionState = "running";
-    record.activity = "constructing Child";
-    record.startedAt = this.now();
-    this.emit(record, "execution-started");
-    this.publish();
-
-    try {
-      const session = await this.options.factory.create(
-        { ...record.request, childId: record.childId, executionId: record.executionId },
-        (type, data) => this.emitChildEvent(record, type, data),
-      );
-      if (record.completion || this.closed || record.cancelRequested) {
-        try { session.dispose(); }
-        catch (error) { recordDiagnostic(record, "dispose", error); }
-        if (!record.completion) {
-          this.commit(record, {
-            status: "cancelled",
-            errorCode: "child-execution-failed",
-            errorMessage: "Cancelled during Child construction; no task was started",
-          });
-          this.closeChild(record);
-        }
-        return;
-      }
-      record.session = session;
-      record.activity = "working";
-      this.emit(record, "child-created");
-      const provisional = await session.start(record.request.task);
-      record.provisional = provisional;
-      this.trySettle(record);
-    } catch (error) {
-      if (!record.completion) {
-        const normalized = asSubagentError(error, "child-startup-failed", record.executionId);
-        this.commit(record, {
-          status: record.cancelRequested ? "cancelled" : "failed",
-          errorCode: normalized.code,
-          errorMessage: normalized.message,
-          diagnostic: normalized.message,
-        });
-      }
-    } finally {
-      if (record.completion) this.closeChild(record);
-    }
+  private fail(record: RecordState, error: unknown, fallback: "child-startup-failed" | "child-execution-failed"): void {
+    if (record.completion) return;
+    const normalized = asSubagentError(error, fallback, record.executionId);
+    this.commit(record, {
+      status: record.cancelRequested ? "cancelled" : "failed",
+      errorCode: normalized.code,
+      errorMessage: normalized.message,
+      diagnostic: normalized.message,
+    });
   }
 
   private trySettle(record: RecordState): void {
     if (!record.provisional || record.pendingControls > 0 || record.completion) return;
-    this.commit(record, record.provisional);
-    if (record.reusable) this.finishReusable(record, record.reusable, record.provisional.status === "succeeded");
-    else this.closeChild(record);
+    const completion = this.commit(record, record.provisional);
+    this.release(record, completion.status === "succeeded");
   }
 
-  private finishReusable(record: RecordState, state: ReusableState, reusable: boolean): void {
-    if (record.startedAt !== undefined) this.executing = Math.max(0, this.executing - 1);
-    record.session = undefined;
-    state.active = undefined;
-    if (reusable && !state.closed) {
-      record.childState = "idle";
-      record.activity = "idle";
-      this.emit(record, "child-idle");
+  private release(record: RecordState, retainSession: boolean): void {
+    if (record.slotHeld) {
+      record.slotHeld = false;
+      this.executing = Math.max(0, this.executing - 1);
+    }
+    const reusable = record.reusable;
+    if (reusable) {
+      record.session = undefined;
+      if (reusable.active === record) reusable.active = undefined;
+      if (retainSession && !reusable.closed) {
+        record.childState = "idle";
+        record.activity = "idle";
+        this.emit(record, "child-idle");
+      } else {
+        this.closeReusable(reusable);
+      }
     } else {
-      state.closed = true;
-      this.closeReusable(state);
+      const wasClosed = record.childState === "closed";
+      if (!wasClosed) record.childState = "closing";
+      try { record.session?.dispose(); }
+      catch (error) { recordDiagnostic(record, "dispose", error); }
+      record.session = undefined;
+      if (!wasClosed) {
+        record.childState = "closed";
+        this.liveChildren = Math.max(0, this.liveChildren - 1);
+        this.emit(record, "child-closed");
+      }
     }
     this.publish();
     this.drain();
@@ -584,8 +579,8 @@ export class ChildRegistry {
     this.publish();
   }
 
-  private commit(record: RecordState, candidate: AdapterCompletion): void {
-    if (record.completion) return;
+  private commit(record: RecordState, candidate: AdapterCompletion): Completion {
+    if (record.completion) return record.completion;
     let status = candidate.status;
     let text = candidate.text;
     let errorCode = candidate.errorCode;
@@ -635,6 +630,7 @@ export class ChildRegistry {
     }
     this.publish();
     this.scheduleInjection();
+    return record.completion;
   }
 
   private observeTerminal(record: RecordState, consumePending: boolean): WaitResult {
@@ -700,28 +696,11 @@ export class ChildRegistry {
     return operation;
   }
 
-  private closeChild(record: RecordState): void {
-    if (record.childState === "closed") return;
-    record.childState = "closing";
-    try { record.session?.dispose(); }
-    catch (error) { recordDiagnostic(record, "dispose", error); }
-    record.session = undefined;
-    record.childState = "closed";
-    if (record.startedAt !== undefined) this.executing = Math.max(0, this.executing - 1);
-    this.liveChildren = Math.max(0, this.liveChildren - 1);
-    this.emit(record, "child-closed");
-    this.publish();
-    this.drain();
-  }
-
   private drain(): void {
     if (this.closed) return;
     while (this.executing < LIMITS.executingChildren && this.queue.length > 0) {
       const next = this.queue.shift()!;
-      if (!next.completion && !next.cancelRequested) {
-        if (next.reusable) void this.startReusable(next, next.reusable);
-        else void this.start(next);
-      }
+      if (!next.completion && !next.cancelRequested) void this.start(next);
     }
   }
 

@@ -142,6 +142,8 @@ function toolResult(text: string, details: unknown = {}) {
   return { content: [{ type: "text" as const, text }], details };
 }
 
+const DEFAULT_WAIT_TIMEOUT_MS = 60_000;
+
 const ToolParameters = Type.Object({
   action: StringEnum(["launch", "wait", "steer", "follow_up", "cancel", "inspect", "list"] as const),
   task: Type.Optional(Type.String()),
@@ -150,7 +152,11 @@ const ToolParameters = Type.Object({
   label: Type.Optional(Type.String()),
   executionId: Type.Optional(Type.String()),
   message: Type.Optional(Type.String()),
-  timeoutMs: Type.Optional(Type.Number({ minimum: 0 })),
+  timeoutMs: Type.Optional(Type.Number({
+    minimum: 0,
+    default: DEFAULT_WAIT_TIMEOUT_MS,
+    description: "Wait deadline in milliseconds; defaults to 60000 (1 minute).",
+  })),
 });
 type ToolInput = Static<typeof ToolParameters>;
 
@@ -326,7 +332,10 @@ export default function subagentExtension(pi: ExtensionAPI) {
     label: "Subagent",
     description: "Manage isolated in-process Child executions by stable executionId. Actions: launch, wait, steer, follow_up, cancel, inspect, list.",
     promptSnippet: "Launch and manage isolated Child executions",
-    promptGuidelines: ["Use subagent executionId values, never labels, for control actions."],
+    promptGuidelines: [
+      "Use subagent executionId values, never labels, for control actions.",
+      "For subagent wait, use the 60000ms default unless the user explicitly requests another timeout.",
+    ],
     parameters: ToolParameters,
     async execute(_toolCallId, params: ToolInput, signal, onUpdate, ctx) {
       const executionId = params.executionId;
@@ -345,7 +354,10 @@ export default function subagentExtension(pi: ExtensionAPI) {
         }
         case "wait": {
           if (!executionId) throw new SubagentError("invalid-arguments", "wait requires executionId");
-          const result = await runtime().controller.wait(executionId, { timeoutMs: params.timeoutMs, signal });
+          const result = await runtime().controller.wait(executionId, {
+            timeoutMs: params.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS,
+            signal,
+          });
           return toolResult(completionText(result.completion), { ...result, snapshot: runtime().store.lookup(executionId) });
         }
         case "steer":

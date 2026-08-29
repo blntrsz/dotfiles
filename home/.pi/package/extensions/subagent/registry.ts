@@ -57,7 +57,7 @@ export interface RegistryOptions {
   factory: ChildSessionFactory;
   delivery: DeliveryPort;
   now?: () => number;
-  identity?: (kind: "child" | "execution") => string;
+  identity?: (kind: "child" | "handle" | "execution") => string;
   schedule?: (callback: () => void) => void;
   cleanupMs?: number;
   shutdownMs?: number;
@@ -102,6 +102,7 @@ interface RecordState {
 
 interface ReusableState {
   childId: string;
+  handleId: string;
   request: LaunchRequest;
   session?: ChildSession;
   reserved: boolean;
@@ -138,9 +139,14 @@ const EMPTY_USAGE: UsageSnapshot = {
 };
 
 let fallbackIdentity = 0;
-function defaultIdentity(kind: "child" | "execution"): string {
+function defaultIdentity(kind: "child" | "handle" | "execution"): string {
   fallbackIdentity += 1;
-  return `${kind === "child" ? "ch" : "ex"}_${Date.now().toString(36)}_${fallbackIdentity.toString(36)}`;
+  const prefix = kind === "child" ? "ch" : kind === "handle" ? "ha" : "ex";
+  return `${prefix}_${Date.now().toString(36)}_${fallbackIdentity.toString(36)}`;
+}
+
+function recordDiagnostic(record: RecordState, operation: "abort" | "dispose", error: unknown): void {
+  record.diagnostics.push(boundedExcerpt(`${operation}: ${error instanceof Error ? error.message : String(error)}`));
 }
 
 export class ChildRegistry {
@@ -148,7 +154,7 @@ export class ChildRegistry {
   private readonly queue: RecordState[] = [];
   private readonly listeners = new Set<(snapshots: readonly ExecutionSnapshot[]) => void>();
   private readonly now: () => number;
-  private readonly identity: (kind: "child" | "execution") => string;
+  private readonly identity: (kind: "child" | "handle" | "execution") => string;
   private readonly schedule: (callback: () => void) => void;
   private executing = 0;
   private liveChildren = 0;
@@ -168,6 +174,7 @@ export class ChildRegistry {
     this.assertOpen();
     const state: ReusableState = {
       childId: this.identity("child"),
+      handleId: this.identity("handle"),
       request: { ...request, tools: Object.freeze([...request.tools]), forcedSkills: request.forcedSkills ? Object.freeze([...request.forcedSkills]) : undefined },
       reserved: false,
       closed: false,
@@ -186,6 +193,13 @@ export class ChildRegistry {
         }
         if (this.nonterminalCount() >= LIMITS.nonterminalExecutions) {
           throw new SubagentError("capacity-rejected", "Subagent capacity is full; no work was admitted");
+        }
+        for (const previous of state.records) {
+          if (previous.childState === "idle") {
+            previous.childState = "closed";
+            previous.activity = "retained in process history";
+            this.emit(previous, "execution-retained");
+          }
         }
         const record = this.makeRecord({ ...state.request, task }, state.childId);
         record.consumeOnCompletion = true;
@@ -216,7 +230,7 @@ export class ChildRegistry {
           await this.wait(state.active.executionId).catch(() => undefined);
         } else if (options.cancel) {
           await state.session?.abort().catch((error) => {
-            for (const record of state.records) record.diagnostics.push(boundedExcerpt(`abort: ${error instanceof Error ? error.message : String(error)}`));
+            for (const record of state.records) recordDiagnostic(record, "abort", error);
           });
         }
         this.closeReusable(state);
@@ -368,14 +382,15 @@ export class ChildRegistry {
     this.scheduleInjection();
   }
 
-  shutdown(): Promise<void> {
+  shutdown(options: { deadline?: number } = {}): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise;
     this.closed = true;
-    this.shutdownPromise = this.performShutdown();
+    const deadline = options.deadline ?? this.now() + (this.options.shutdownMs ?? LIMITS.shutdownMs);
+    this.shutdownPromise = this.performShutdown(deadline);
     return this.shutdownPromise;
   }
 
-  private async performShutdown(): Promise<void> {
+  private async performShutdown(deadline: number): Promise<void> {
     for (const record of this.records.values()) {
       for (const waiter of record.waiters.splice(0)) {
         this.clearWaiter(waiter);
@@ -392,12 +407,12 @@ export class ChildRegistry {
       record.cancelRequested = true;
       record.executionState = "cancelling";
       await record.session?.abort().catch((error) => {
-        record.diagnostics.push(boundedExcerpt(`abort: ${error instanceof Error ? error.message : String(error)}`));
+        recordDiagnostic(record, "abort", error);
       });
     }));
     await Promise.race([
       cleanup,
-      new Promise((resolve) => setTimeout(resolve, this.options.shutdownMs ?? LIMITS.shutdownMs)),
+      new Promise((resolve) => setTimeout(resolve, Math.max(0, deadline - this.now()))),
     ]);
 
     for (const record of this.records.values()) {
@@ -493,7 +508,7 @@ export class ChildRegistry {
       );
       if (record.completion || this.closed || record.cancelRequested) {
         try { session.dispose(); }
-        catch (error) { record.diagnostics.push(boundedExcerpt(`dispose: ${error instanceof Error ? error.message : String(error)}`)); }
+        catch (error) { recordDiagnostic(record, "dispose", error); }
         if (!record.completion) {
           this.commit(record, {
             status: "cancelled",
@@ -549,10 +564,11 @@ export class ChildRegistry {
   }
 
   private closeReusable(state: ReusableState): void {
+    state.closed = true;
     const wasOpen = state.reserved || state.session !== undefined;
     try { state.session?.dispose(); } catch (error) {
       state.cleanupError ??= error;
-      for (const record of state.records) record.diagnostics.push(boundedExcerpt(`dispose: ${error instanceof Error ? error.message : String(error)}`));
+      for (const record of state.records) recordDiagnostic(record, "dispose", error);
     }
     state.session = undefined;
     if (state.reserved) {
@@ -591,6 +607,7 @@ export class ChildRegistry {
     record.executionState = status;
     record.activity = status;
     record.completion = Object.freeze({
+      completionId: `completion:${record.executionId}`,
       sequence: ++this.completionSequence,
       executionId: record.executionId,
       childId: record.childId,
@@ -685,7 +702,7 @@ export class ChildRegistry {
     if (record.childState === "closed") return;
     record.childState = "closing";
     try { record.session?.dispose(); }
-    catch (error) { record.diagnostics.push(boundedExcerpt(`dispose: ${error instanceof Error ? error.message : String(error)}`)); }
+    catch (error) { recordDiagnostic(record, "dispose", error); }
     record.session = undefined;
     record.childState = "closed";
     if (record.startedAt !== undefined) this.executing = Math.max(0, this.executing - 1);
@@ -734,6 +751,8 @@ export class ChildRegistry {
   private snapshot(record: RecordState): ExecutionSnapshot {
     const base: ExecutionSnapshot = {
       childId: record.childId,
+      handleId: record.reusable?.handleId,
+      handleState: record.reusable ? (record.reusable.closed ? "closed" : record.reusable.active ? "executing" : "idle") : undefined,
       executionId: record.executionId,
       label: record.label,
       task: record.request.task,
@@ -742,7 +761,7 @@ export class ChildRegistry {
       thinkingLevel: record.request.thinkingLevel,
       childState: record.childState,
       executionState: record.executionState,
-      delivery: Object.freeze({ state: record.deliveryState, diagnostic: record.deliveryDiagnostic }),
+      delivery: Object.freeze({ deliveryId: `delivery:${record.executionId}`, state: record.deliveryState, diagnostic: record.deliveryDiagnostic }),
       completion: record.completion,
       activity: record.activity,
       events: Object.freeze([...record.events]),

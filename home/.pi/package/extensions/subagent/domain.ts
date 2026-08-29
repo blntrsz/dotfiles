@@ -10,6 +10,7 @@ export const LIMITS = {
 } as const;
 
 export type ChildId = string;
+export type HandleId = string;
 export type ExecutionId = string;
 export type ContextMode = "fresh" | "fork";
 export type ChildState = "unstarted" | "executing" | "idle" | "closing" | "closed";
@@ -33,6 +34,7 @@ export interface UsageSnapshot {
 }
 
 export interface Completion {
+  readonly completionId: string;
   readonly sequence: number;
   readonly executionId: ExecutionId;
   readonly childId: ChildId;
@@ -44,6 +46,7 @@ export interface Completion {
 }
 
 export interface Delivery {
+  readonly deliveryId: string;
   readonly state: DeliveryState;
   readonly diagnostic?: string;
 }
@@ -59,6 +62,8 @@ export interface NormalizedEvent {
 
 export interface ExecutionSnapshot {
   readonly childId: ChildId;
+  readonly handleId?: HandleId;
+  readonly handleState?: "executing" | "idle" | "closed";
   readonly executionId: ExecutionId;
   readonly label: string;
   readonly task: string;

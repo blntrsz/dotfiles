@@ -213,7 +213,10 @@ void test("parent shutdown waits for Handle cleanup and reports parent closure",
   const invoker = new WorkflowInvoker({ cwd, trusted: () => true, backend });
   const invocation = invoker.invoke("shutdown-work", []);
   await new Promise((resolve) => setTimeout(resolve, 5));
-  await invoker.shutdown();
+  const firstShutdown = invoker.shutdown();
+  const secondShutdown = invoker.shutdown();
+  assert.equal(firstShutdown, secondShutdown);
+  await firstShutdown;
   await assert.rejects(invocation, (error: unknown) => error instanceof SubagentError && error.code === "parent-closed");
   assert.equal(closed, 1);
 });
@@ -337,7 +340,10 @@ void test("the production backend preserves one Child conversation and forwards 
   assert.equal(executions.length, 2);
   assert.equal(executions[0]?.childId, executions[1]?.childId);
   assert.deepEqual(executions.map((execution) => execution.delivery.state), ["consumed", "consumed"]);
+  assert.equal(executions[0]?.childState, "closed");
   assert.equal(executions[1]?.childState, "idle");
+  assert.equal(executions[0]?.handleId, executions[1]?.handleId);
+  assert.equal(executions[1]?.handleState, "idle");
   await child.close();
   assert.deepEqual(resolved, { label: "worker", model: "test/model", skills: ["one", "two"] });
   assert.equal(disposed, 1);

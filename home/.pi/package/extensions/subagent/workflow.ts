@@ -259,14 +259,15 @@ export class WorkflowInvoker {
     return provisional!;
   }
 
-  shutdown(): Promise<void> {
+  shutdown(options: { deadline?: number } = {}): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise;
     this.closed = true;
-    this.shutdownPromise = this.performShutdown();
+    const deadline = options.deadline ?? Date.now() + (this.options.shutdownMs ?? LIMITS.shutdownMs);
+    this.shutdownPromise = this.performShutdown(deadline);
     return this.shutdownPromise;
   }
 
-  private async performShutdown(): Promise<void> {
+  private async performShutdown(deadline: number): Promise<void> {
     const active = Array.from(this.invocations.entries());
     for (const [invocation] of active) invocation.abort(new SubagentError("parent-closed", "Parent runtime closed"));
     if (active.length === 0) return;
@@ -274,7 +275,7 @@ export class WorkflowInvoker {
     try {
       await Promise.race([
         Promise.allSettled(active.map(([, settled]) => settled)),
-        new Promise((resolve) => { timer = setTimeout(resolve, this.options.shutdownMs ?? LIMITS.shutdownMs); }),
+        new Promise((resolve) => { timer = setTimeout(resolve, Math.max(0, deadline - Date.now())); }),
       ]);
     } finally {
       if (timer) clearTimeout(timer);

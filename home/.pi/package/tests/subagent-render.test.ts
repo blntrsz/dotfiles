@@ -23,7 +23,7 @@ function snapshot(overrides: Partial<ExecutionSnapshot> = {}): ExecutionSnapshot
     thinkingLevel: "high",
     childState: "executing",
     executionState: "running",
-    delivery: { state: "pending" },
+    delivery: { deliveryId: "delivery:ex_1", state: "pending" },
     activity: "using read",
     events: [],
     usage: { input: 1200, output: 300, cacheRead: 0, cacheWrite: 0, cost: 0.01, turns: 2 },
@@ -60,9 +60,9 @@ void test("expanded cards expose identities, delivery, and terminal diagnostics"
   const text = cardText(snapshot({
     childState: "closed",
     executionState: "failed",
-    delivery: { state: "pending", diagnostic: "queue unavailable" },
+    delivery: { deliveryId: "delivery:ex_1", state: "pending", diagnostic: "queue unavailable" },
     completion: {
-      sequence: 1, childId: "ch_1", executionId: "ex_1", status: "failed",
+      completionId: "completion:ex_1", sequence: 1, childId: "ch_1", executionId: "ex_1", status: "failed",
       error: { code: "child-execution-failed", message: "provider failed" }, committedAt: 2,
     },
   }), true, theme);
@@ -82,13 +82,13 @@ void test("collapsed FleetView matches the pi-subagents inspect affordance", () 
 void test("FleetView groups parent, live and idle Children before dim process history", () => {
   const running = snapshot();
   const idle = snapshot({
-    childId: "ch_2", executionId: "ex_2", label: "reusable", childState: "idle", executionState: "succeeded", delivery: { state: "consumed" },
-    completion: { sequence: 1, childId: "ch_2", executionId: "ex_2", status: "succeeded", text: "done", committedAt: 2 },
+    childId: "ch_2", handleId: "ha_2", handleState: "idle", executionId: "ex_2", label: "reusable", childState: "idle", executionState: "succeeded", delivery: { deliveryId: "delivery:ex_2", state: "consumed" },
+    completion: { completionId: "completion:ex_2", sequence: 1, childId: "ch_2", executionId: "ex_2", status: "succeeded", text: "done", committedAt: 2 },
   });
   const historical = snapshot({
     childId: "ch_3", executionId: "ex_3", label: "one-shot", childState: "closed", executionState: "failed",
-    delivery: { state: "pending", diagnostic: "queue unavailable" },
-    completion: { sequence: 2, childId: "ch_3", executionId: "ex_3", status: "failed", error: { code: "child-execution-failed", message: "nope" }, committedAt: 3 },
+    delivery: { deliveryId: "delivery:ex_3", state: "pending", diagnostic: "queue unavailable" },
+    completion: { completionId: "completion:ex_3", sequence: 2, childId: "ch_3", executionId: "ex_3", status: "failed", error: { code: "child-execution-failed", message: "nope" }, committedAt: 3 },
   });
   const lines = fleetRosterLines([historical, idle, running], 1, 120, theme);
   assert.match(lines.join("\n"), /main[\s\S]*reviewer[\s\S]*reusable[\s\S]*Process history[\s\S]*one-shot/);
@@ -123,7 +123,7 @@ void test("live transcript cards repaint from the latest RunStore projection", (
     childState: "closed",
     executionState: "succeeded",
     activity: "completed",
-    completion: { sequence: 1, childId: "ch_1", executionId: "ex_1", status: "succeeded", text: "done", committedAt: 2 },
+    completion: { completionId: "completion:ex_1", sequence: 1, childId: "ch_1", executionId: "ex_1", status: "succeeded", text: "done", committedAt: 2 },
   });
   const refreshed = card.render(100).join("\n");
   assert.match(refreshed, /✓ reviewer/);
@@ -146,6 +146,41 @@ void test("Fleet inspector uses the reference two-pane live layout", () => {
   assert.ok(lines.some((line) => line.includes("reviewer · running")));
   assert.match(lines.at(-2) ?? "", /agent.*scroll.*refresh.*close/);
   assert.ok(lines.every((line) => visibleWidth(line) <= 100));
+  inspector.dispose();
+});
+
+void test("inspector refreshes waiting, Delivery, terminal, idle, and retained-history detail", () => {
+  let publish!: (runs: readonly ExecutionSnapshot[]) => void;
+  const initial = snapshot({ activity: "parent waiting", delivery: { deliveryId: "delivery:ex_1", state: "consumed" } });
+  const store = {
+    list: () => [initial],
+    subscribe(listener: (runs: readonly ExecutionSnapshot[]) => void) {
+      publish = listener;
+      listener([initial]);
+      return () => undefined;
+    },
+  } as unknown as RunStore;
+  const inspector = new FleetInspector({ requestRender() {} } as never, theme, store, () => undefined, "ex_1");
+  const waiting = inspector.render(140).join("\n");
+  assert.match(waiting, /parent waiting/);
+  assert.match(waiting, /Delivery delivery:ex_1 \(consumed\)/);
+  publish([snapshot({
+    childState: "closed",
+    executionState: "cancelled",
+    activity: "cancelled",
+    delivery: { deliveryId: "delivery:ex_1", state: "injected" },
+    completion: {
+      completionId: "completion:ex_1", sequence: 1, childId: "ch_1", executionId: "ex_1",
+      status: "cancelled", error: { code: "cleanup-grace-exceeded", message: "cooperative cancellation" }, committedAt: 2,
+    },
+    omitted: { bytes: 42, events: 3 },
+  })]);
+  const refreshed = inspector.render(140).join("\n");
+  assert.match(refreshed, /cancelled/);
+  assert.match(refreshed, /Delivery delivery:ex_1 \(injected\)/);
+  assert.match(refreshed, /3 retained-history events and 42 bytes omitted/);
+  inspector.invalidate();
+  assert.doesNotThrow(() => inspector.render(80));
   inspector.dispose();
 });
 
@@ -176,6 +211,35 @@ void test("inspector actions capture the selected stable Execution identity", as
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(calls, ["steer:ex_1", "wait:ex_1", "cancel:ex_1"]);
   inspector.dispose();
+});
+
+void test("closing the inspector aborts an active wait without retargeting Delivery", async () => {
+  let waitAborted = false;
+  const store = {
+    list: () => [snapshot()],
+    subscribe: () => () => undefined,
+  } as unknown as RunStore;
+  const inspector = new FleetInspector(
+    { requestRender() {} } as never,
+    theme,
+    store,
+    () => undefined,
+    "ex_1",
+    {
+      async steer() {},
+      async wait(_id, signal) {
+        await new Promise<void>((_resolve, reject) => signal.addEventListener("abort", () => {
+          waitAborted = true;
+          reject(new Error("aborted"));
+        }, { once: true }));
+      },
+      async cancel() {},
+    },
+  );
+  inspector.handleInput("w");
+  inspector.dispose();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(waitAborted, true);
 });
 
 void test("Fleet roster activates from the empty editor and opens the selected inspector", async () => {

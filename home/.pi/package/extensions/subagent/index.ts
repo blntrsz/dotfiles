@@ -8,7 +8,7 @@ import type {
 import { Text } from "@earendil-works/pi-tui";
 import { Type, type Static } from "typebox";
 import { childToolCeiling } from "./capabilities.ts";
-import { SubagentError, type Completion, type ContextMode, type ExecutionSnapshot } from "./domain.ts";
+import { LIMITS, SubagentError, type Completion, type ContextMode, type ExecutionSnapshot } from "./domain.ts";
 import { SubagentFleetUi } from "./fleet-ui.ts";
 import { renderCard, renderLiveCard } from "./render.ts";
 import { ChildRegistry, type LaunchRequest } from "./registry.ts";
@@ -32,6 +32,17 @@ interface ParsedLaunch {
   context: ContextMode;
   model?: string;
   task: string;
+}
+
+async function closeRuntime(runtime: Runtime | undefined): Promise<void> {
+  if (!runtime) return;
+  runtime.fleetUi?.dispose();
+  runtime.store.dispose();
+  const deadline = Date.now() + LIMITS.shutdownMs;
+  await Promise.allSettled([
+    runtime.workflows.shutdown({ deadline }),
+    runtime.registry.shutdown({ deadline }),
+  ]);
 }
 
 export function shellWords(input: string): string[] {
@@ -177,9 +188,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
     // barrier so a host cannot overwrite a still-owned runtime.
     const previous = current;
     current = undefined;
-    previous?.fleetUi?.dispose();
-    previous?.store.dispose();
-    if (previous) await Promise.allSettled([previous.workflows.shutdown(), previous.registry.shutdown()]);
+    await closeRuntime(previous);
 
     const factory = new PiChildSessionFactory({
       modelRuntime: canonicalModelRuntime(ctx.modelRegistry),
@@ -225,9 +234,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
   pi.on("session_shutdown", async () => {
     const closing = current;
     current = undefined;
-    closing?.fleetUi?.dispose();
-    closing?.store.dispose();
-    if (closing) await Promise.allSettled([closing.workflows.shutdown(), closing.registry.shutdown()]);
+    await closeRuntime(closing);
   });
 
   pi.registerCommand("subagent", {

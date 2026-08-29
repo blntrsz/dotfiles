@@ -115,7 +115,7 @@ export function fleetLines(snapshots: readonly ExecutionSnapshot[], width: numbe
   const executing = snapshots.filter((run) => run.executionState === "running" || run.executionState === "starting").length;
   const cancelling = snapshots.filter((run) => run.executionState === "cancelling").length;
   const idle = snapshots.filter((run) => run.childState === "idle").length;
-  const history = snapshots.filter((run) => run.childState === "closed" && terminalState(run)).length;
+  const history = snapshots.filter((run) => run.childState === "closed" && isTerminalExecution(run)).length;
   const pendingDelivery = snapshots.filter((run) => run.delivery.state === "pending" && run.completion).length;
   const total = snapshots.reduce((sum, run) => sum + run.usage.input + run.usage.output, 0);
   const active = executing + cancelling;
@@ -140,11 +140,9 @@ export function fleetRosterLines(
   width: number,
   theme: Theme,
 ): string[] {
-  const indexed = snapshots.map((snapshot, index) => ({ snapshot, index }));
-  const live = indexed
-    .filter(({ snapshot }) => snapshot.childState !== "closed")
-    .sort((a, b) => Number(a.snapshot.childState === "idle") - Number(b.snapshot.childState === "idle"));
-  const history = indexed.filter(({ snapshot }) => snapshot.childState === "closed" && terminalState(snapshot));
+  const indexed = orderedFleetSnapshots(snapshots).map((snapshot, index) => ({ snapshot, index }));
+  const live = indexed.filter(({ snapshot }) => snapshot.childState !== "closed");
+  const history = indexed.filter(({ snapshot }) => snapshot.childState === "closed" && isTerminalExecution(snapshot));
   const lines = [theme.fg("dim", "  ↑↓/jk select · enter inspect · esc back"), "", `${selected === 0 ? theme.fg("accent", ">") : " "} main`];
   const append = ({ snapshot, index }: (typeof indexed)[number], dim = false) => {
     const presentation = STATE_PRESENTATION[snapshot.executionState];
@@ -165,6 +163,13 @@ export function fleetRosterLines(
   return lines;
 }
 
-function terminalState(snapshot: ExecutionSnapshot): boolean {
+export function isTerminalExecution(snapshot: ExecutionSnapshot): boolean {
   return snapshot.executionState === "succeeded" || snapshot.executionState === "failed" || snapshot.executionState === "cancelled";
+}
+
+export function orderedFleetSnapshots(snapshots: readonly ExecutionSnapshot[]): readonly ExecutionSnapshot[] {
+  return Object.freeze([...snapshots].sort((a, b) => {
+    const rank = (snapshot: ExecutionSnapshot) => snapshot.childState === "closed" ? 2 : snapshot.childState === "idle" ? 1 : 0;
+    return rank(a) - rank(b) || a.createdAt - b.createdAt;
+  }));
 }

@@ -1,7 +1,7 @@
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { isKeyRelease, matchesKey, truncateToWidth, visibleWidth, type Component, type TUI } from "@earendil-works/pi-tui";
 import type { ExecutionSnapshot } from "./domain.ts";
-import { fleetLines, fleetRosterLines } from "./render.ts";
+import { fleetLines, fleetRosterLines, isTerminalExecution, orderedFleetSnapshots } from "./render.ts";
 import { RunController, RunStore } from "./run-store.ts";
 
 const WIDGET_KEY = "subagent-fleet";
@@ -9,17 +9,6 @@ const WIDGET_KEY = "subagent-fleet";
 function fit(value: string, width: number): string {
   const clipped = truncateToWidth(value, Math.max(0, width));
   return clipped + " ".repeat(Math.max(0, width - visibleWidth(clipped)));
-}
-
-function terminalState(snapshot: ExecutionSnapshot): boolean {
-  return snapshot.executionState === "succeeded" || snapshot.executionState === "failed" || snapshot.executionState === "cancelled";
-}
-
-function orderedSnapshots(snapshots: readonly ExecutionSnapshot[]): readonly ExecutionSnapshot[] {
-  return Object.freeze([...snapshots].sort((a, b) => {
-    const rank = (snapshot: ExecutionSnapshot) => snapshot.childState === "closed" ? 2 : snapshot.childState === "idle" ? 1 : 0;
-    return rank(a) - rank(b) || a.createdAt - b.createdAt;
-  }));
 }
 
 export function executionControls(snapshot: ExecutionSnapshot): { steer: boolean; wait: boolean; cancel: boolean } {
@@ -33,7 +22,7 @@ export function executionControls(snapshot: ExecutionSnapshot): { steer: boolean
 
 interface InspectorActions {
   steer(executionId: string): Promise<void>;
-  wait(executionId: string): Promise<void>;
+  wait(executionId: string, signal: AbortSignal): Promise<void>;
   cancel(executionId: string): Promise<void>;
 }
 
@@ -56,6 +45,8 @@ export class FleetInspector implements Component {
   private scroll = 0;
   private toolsExpanded = false;
   private notice = "";
+  private disposed = false;
+  private readonly lifetime = new AbortController();
   private unsubscribe: () => void;
 
   constructor(
@@ -66,11 +57,11 @@ export class FleetInspector implements Component {
     initialExecutionId?: string,
     private readonly actions?: InspectorActions,
   ) {
-    this.snapshots = orderedSnapshots(store.list());
+    this.snapshots = orderedFleetSnapshots(store.list());
     this.selected = Math.max(0, initialExecutionId ? this.snapshots.findIndex((run) => run.executionId === initialExecutionId) : 0);
     this.unsubscribe = store.subscribe((snapshots) => {
       const selectedId = this.snapshots[this.selected]?.executionId;
-      this.snapshots = orderedSnapshots(snapshots);
+      this.snapshots = orderedFleetSnapshots(snapshots);
       const preserved = selectedId ? this.snapshots.findIndex((run) => run.executionId === selectedId) : -1;
       this.selected = preserved >= 0 ? preserved : Math.min(this.selected, Math.max(0, this.snapshots.length - 1));
       this.tui.requestRender();
@@ -78,6 +69,9 @@ export class FleetInspector implements Component {
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.lifetime.abort();
     this.unsubscribe();
   }
 
@@ -113,11 +107,12 @@ export class FleetInspector implements Component {
     const controls = executionControls(snapshot);
     const executionId = snapshot.executionId;
     if (data === "s" && controls.steer) void this.runAction("Steering", () => this.actions!.steer(executionId));
-    if (data === "w" && controls.wait) void this.runAction("Waiting", () => this.actions!.wait(executionId));
+    if (data === "w" && controls.wait) void this.runAction("Waiting", () => this.actions!.wait(executionId, this.lifetime.signal));
     if (data === "c" && controls.cancel) void this.runAction("Cancellation requested; settlement is cooperative", () => this.actions!.cancel(executionId));
   }
 
   private async runAction(notice: string, action: () => Promise<void>): Promise<void> {
+    if (this.disposed) return;
     this.notice = notice;
     this.tui.requestRender();
     try {
@@ -126,7 +121,7 @@ export class FleetInspector implements Component {
     } catch (error) {
       this.notice = error instanceof Error ? error.message : String(error);
     }
-    this.tui.requestRender();
+    if (!this.disposed) this.tui.requestRender();
   }
 
   render(width: number): string[] {
@@ -138,7 +133,7 @@ export class FleetInspector implements Component {
     const titleState = selected ? `${selected.label} · ${selected.executionState}` : "no executions";
     const border = (value: string) => this.theme.fg("borderAccent", value);
     const top = border(`┌${"─".repeat(leftWidth)}┬${"─".repeat(rightWidth)}┐`);
-    const title = truncateToWidth(` Subagent fleet inspector · inspection only · live`, leftWidth);
+    const title = truncateToWidth(` Subagent fleet inspector · live`, leftWidth);
     const selectedTitle = truncateToWidth(` ${titleState}`, rightWidth);
     const lines = [
       top,
@@ -169,12 +164,12 @@ export class FleetInspector implements Component {
     const indexed = this.snapshots.map((snapshot, index) => ({ snapshot, index }));
     const append = ({ snapshot, index }: (typeof indexed)[number], historical = false) => {
       const marker = index === this.selected ? this.theme.fg("accent", ">") : " ";
-      const glyph = snapshot.executionState === "running" ? this.theme.fg("accent", "●") : terminalState(snapshot) ? this.theme.fg(snapshot.executionState === "succeeded" ? "success" : "error", snapshot.executionState === "succeeded" ? "✓" : "✗") : this.theme.fg("muted", "◦");
+      const glyph = snapshot.executionState === "running" ? this.theme.fg("accent", "●") : isTerminalExecution(snapshot) ? this.theme.fg(snapshot.executionState === "succeeded" ? "success" : "error", snapshot.executionState === "succeeded" ? "✓" : "✗") : this.theme.fg("muted", "◦");
       const text = `${marker} ${glyph} ${snapshot.label} · ${snapshot.childState === "idle" ? "idle" : snapshot.executionState}`;
       lines.push(truncateToWidth(historical ? this.theme.fg("dim", text) : this.theme.bold(text), width));
     };
     indexed.filter(({ snapshot }) => snapshot.childState !== "closed").forEach((entry) => append(entry));
-    const history = indexed.filter(({ snapshot }) => snapshot.childState === "closed" && terminalState(snapshot));
+    const history = indexed.filter(({ snapshot }) => snapshot.childState === "closed" && isTerminalExecution(snapshot));
     if (history.length) {
       lines.push("", this.theme.fg("dim", " Process history"));
       history.forEach((entry) => append(entry, true));
@@ -189,9 +184,11 @@ export class FleetInspector implements Component {
       ` ${this.theme.bold(snapshot.label)} ${this.theme.fg("dim", `· ${snapshot.executionState}`)}`,
       ` ${this.theme.fg("dim", `${snapshot.context} · ${snapshot.model} · ${snapshot.thinkingLevel}`)}`,
       ` ${this.theme.fg("dim", `${usage.input + usage.output} tok · ${usage.turns} turns · ${snapshot.events.filter((event) => event.type === "tool-start").length} tools`)}`,
-      ` ${this.theme.fg("dim", `Child ${snapshot.childId} · Handle ${snapshot.childState === "idle" ? snapshot.childId : "one-shot"}`)}`,
-      ` ${this.theme.fg("dim", `Execution ${snapshot.executionId} · Completion ${snapshot.completion?.sequence ?? "pending"} · Delivery ${snapshot.delivery.state}`)}`,
+      ` ${this.theme.fg("dim", `Child ${snapshot.childId} · ${snapshot.handleId ? `Handle ${snapshot.handleId} (${snapshot.handleState})` : "Handle — (not applicable)"}`)}`,
+      ` ${this.theme.fg("dim", `Execution ${snapshot.executionId} · Completion ${snapshot.completion?.completionId ?? "pending"} (${snapshot.completion?.status ?? "pending"})`)}`,
+      ` ${this.theme.fg("dim", `Delivery ${snapshot.delivery.deliveryId} (${snapshot.delivery.state})`)}`,
       ` ${this.theme.fg("muted", `Task  ${snapshot.task}`)}`,
+      ` ${this.theme.fg("muted", `Activity  ${snapshot.activity}`)}`,
       "",
       ` ${this.theme.fg("accent", "Conversation")}`,
     ];
@@ -234,15 +231,15 @@ export class SubagentFleetUi {
 
   constructor(private readonly ctx: ExtensionContext, private readonly store: RunStore, private readonly controller?: RunController) {
     this.unsubscribeStore = store.subscribe((snapshots) => {
-      this.snapshots = orderedSnapshots(snapshots);
+      this.snapshots = orderedFleetSnapshots(snapshots);
       this.selected = Math.min(this.selected, this.snapshots.length);
-      const running = snapshots.filter((snapshot) => !terminalState(snapshot)).length;
+      const running = snapshots.filter((snapshot) => !isTerminalExecution(snapshot)).length;
       ctx.ui.setStatus("subagent-fleet", `subagents: ${running} running`);
       this.refresh();
     });
     this.unsubscribeInput = ctx.ui.onTerminalInput((data) => this.handleInput(data));
     this.timer = setInterval(() => {
-      if (this.snapshots.some((snapshot) => !terminalState(snapshot))) this.tui?.requestRender();
+      if (this.snapshots.some((snapshot) => !isTerminalExecution(snapshot))) this.tui?.requestRender();
     }, 500);
     this.timer.unref?.();
   }
@@ -278,7 +275,7 @@ export class SubagentFleetUi {
     }
     if (this.snapshots.length === 0 || this.ctx.ui.getEditorText() !== "") return undefined;
     if (!this.active) {
-      if (!this.snapshots.some((snapshot) => !terminalState(snapshot))) return undefined;
+      if (!this.snapshots.some((snapshot) => !isTerminalExecution(snapshot))) return undefined;
       if (!matchesKey(data, "down") && !matchesKey(data, "left")) return undefined;
       this.active = true;
       this.selected = 0;
@@ -324,8 +321,8 @@ export class SubagentFleetUi {
           const message = await this.ctx.ui.input(`Steer Execution ${stableExecutionId}`, "Instruction for the running Child");
           if (message?.trim()) await this.controller!.steer(stableExecutionId, message);
         },
-        wait: async (stableExecutionId) => {
-          const result = await this.controller!.wait(stableExecutionId);
+        wait: async (stableExecutionId, signal) => {
+          const result = await this.controller!.wait(stableExecutionId, { signal });
           this.ctx.ui.notify(`Execution ${stableExecutionId}: ${result.completion.status}`, "info");
         },
         cancel: async (stableExecutionId) => {

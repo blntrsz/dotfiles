@@ -1,0 +1,36 @@
+#!/bin/sh
+set -eu
+
+agent_dir=${PI_CODING_AGENT_DIR:-"$HOME/.pi/agent"}
+profile=${1:-}
+
+case "$profile" in
+  personal|work) ;;
+  "")
+    current=$(readlink "$agent_dir/settings.json" 2>/dev/null || true)
+    if [ -n "$current" ]; then
+      printf '%s\n' "${current#settings.}" | sed 's/\.json$//'
+      exit 0
+    fi
+    printf '%s\n' "No Pi settings profile is selected." >&2
+    exit 1
+    ;;
+  *)
+    printf '%s\n' "Usage: $0 [personal|work]" >&2
+    exit 2
+    ;;
+esac
+
+target="settings.$profile.json"
+if [ ! -f "$agent_dir/$target" ]; then
+  printf '%s\n' "Missing Pi settings variant: $agent_dir/$target" >&2
+  exit 1
+fi
+
+temporary="$agent_dir/.settings.json.$$"
+trap 'rm -f "$temporary"' EXIT HUP INT TERM
+ln -s "$target" "$temporary"
+mv -f "$temporary" "$agent_dir/settings.json"
+trap - EXIT HUP INT TERM
+
+printf '%s\n' "Selected Pi $profile settings for new processes."

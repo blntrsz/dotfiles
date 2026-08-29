@@ -1,5 +1,17 @@
-home/.pi/agent/auth.json
-home/.pi/agent/models-store.json
-home/.pi/agent/sessions/
-home/.pi/agent/settings.json
-home/.pi/agent/trust.json
+# Pi's writable agent home: allowlist only curated personal files.
+home/.pi/agent/*
+!home/.pi/agent/agents/
+home/.pi/agent/agents/*
+!home/.pi/agent/agents/Explore.md
+!home/.pi/agent/agents/Plan.md
+!home/.pi/agent/extensions/
+home/.pi/agent/extensions/*
+!home/.pi/agent/extensions/herdr-agent-state.ts
+!home/.pi/agent/keybindings.json
+!home/.pi/agent/settings.personal.json
+!home/.pi/agent/settings.work.json
+
+# Local package install artifacts and Pi caches.
+home/.pi/package/node_modules/
+home/.pi/package/package-lock.json
+home/.pi/web-search-cache/

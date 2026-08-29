@@ -1,0 +1,19 @@
+{
+  "name": "@blntrsz/dotfiles-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "clean": "rm -f ../bin/dotfiles ../bin/index.js.map",
+    "build": "bun run clean && bun build --compile --minify ./src/index.ts --outfile ../bin/dotfiles",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "4.0.0-beta.107",
+    "effect": "4.0.0-beta.107"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "latest"
+  }
+}

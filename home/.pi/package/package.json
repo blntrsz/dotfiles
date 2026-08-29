@@ -19,7 +19,8 @@
     "extensions": [
       "./extensions/subagent/index.ts",
       "./extensions/footer.ts",
-      "./extensions/transcript-style.ts"
+      "./extensions/transcript-style.ts",
+      "./extensions/dump-chat.ts"
     ],
     "themes": [
       "./themes"

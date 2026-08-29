@@ -3,8 +3,8 @@ import test from "node:test";
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import type { ExecutionSnapshot } from "../extensions/subagent/domain.ts";
-import { FleetInspector, SubagentFleetUi } from "../extensions/subagent/fleet-ui.ts";
-import { cardText, fleetLines, renderCard, renderLiveCard } from "../extensions/subagent/render.ts";
+import { executionControls, FleetInspector, SubagentFleetUi } from "../extensions/subagent/fleet-ui.ts";
+import { cardText, fleetLines, fleetRosterLines, renderCard, renderLiveCard } from "../extensions/subagent/render.ts";
 import { RunStore } from "../extensions/subagent/run-store.ts";
 
 const theme = {
@@ -43,6 +43,8 @@ void test("RunStore lookups reuse published projections instead of rebuilding sn
   const store = new RunStore(registry as never);
   for (let paint = 0; paint < 100; paint += 1) store.lookup(projected.executionId);
   assert.equal(inspections, 0);
+  assert.throws(() => store.lookup("unknown"), /Unknown execution projection/);
+  assert.equal(inspections, 0);
 });
 
 void test("compact cards match the pi-subagents live-card hierarchy", () => {
@@ -75,6 +77,28 @@ void test("collapsed FleetView matches the pi-subagents inspect affordance", () 
   assert.match(lines[0] ?? "", /1 active agent/);
   assert.match(lines[0] ?? "", /↓ 1\.5k tokens/);
   assert.match(lines[0] ?? "", /↓\/← to inspect/);
+});
+
+void test("FleetView groups parent, live and idle Children before dim process history", () => {
+  const running = snapshot();
+  const idle = snapshot({
+    childId: "ch_2", executionId: "ex_2", label: "reusable", childState: "idle", executionState: "succeeded", delivery: { state: "consumed" },
+    completion: { sequence: 1, childId: "ch_2", executionId: "ex_2", status: "succeeded", text: "done", committedAt: 2 },
+  });
+  const historical = snapshot({
+    childId: "ch_3", executionId: "ex_3", label: "one-shot", childState: "closed", executionState: "failed",
+    delivery: { state: "pending", diagnostic: "queue unavailable" },
+    completion: { sequence: 2, childId: "ch_3", executionId: "ex_3", status: "failed", error: { code: "child-execution-failed", message: "nope" }, committedAt: 3 },
+  });
+  const lines = fleetRosterLines([historical, idle, running], 1, 120, theme);
+  assert.match(lines.join("\n"), /main[\s\S]*reviewer[\s\S]*reusable[\s\S]*Process history[\s\S]*one-shot/);
+  assert.match(fleetLines([historical, idle, running], 120, theme)[0] ?? "", /1 executing.*1 idle.*1 history.*1 delivery pending/);
+});
+
+void test("inspector controls are enabled only for valid stable Execution states", () => {
+  assert.deepEqual(executionControls(snapshot()), { steer: true, wait: true, cancel: true });
+  assert.deepEqual(executionControls(snapshot({ executionState: "cancelling" })), { steer: false, wait: true, cancel: false });
+  assert.deepEqual(executionControls(snapshot({ childState: "closed", executionState: "succeeded" })), { steer: false, wait: true, cancel: false });
 });
 
 void test("live transcript cards cache unchanged paints", () => {
@@ -125,6 +149,35 @@ void test("Fleet inspector uses the reference two-pane live layout", () => {
   inspector.dispose();
 });
 
+void test("inspector actions capture the selected stable Execution identity", async () => {
+  const calls: string[] = [];
+  const store = {
+    list: () => [snapshot()],
+    subscribe(listener: (runs: readonly ExecutionSnapshot[]) => void) {
+      listener([snapshot()]);
+      return () => undefined;
+    },
+  } as unknown as RunStore;
+  const inspector = new FleetInspector(
+    { requestRender() {} } as never,
+    theme,
+    store,
+    () => undefined,
+    "ex_1",
+    {
+      async steer(id) { calls.push(`steer:${id}`); },
+      async wait(id) { calls.push(`wait:${id}`); },
+      async cancel(id) { calls.push(`cancel:${id}`); },
+    },
+  );
+  inspector.handleInput("s");
+  inspector.handleInput("w");
+  inspector.handleInput("c");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(calls, ["steer:ex_1", "wait:ex_1", "cancel:ex_1"]);
+  inspector.dispose();
+});
+
 void test("Fleet roster activates from the empty editor and opens the selected inspector", async () => {
   let widget: ((tui: never, theme: Theme) => { render(width: number): string[] }) | undefined;
   let inspectorOpened = 0;
@@ -169,7 +222,16 @@ void test("Fleet roster activates from the empty editor and opens the selected i
   assert.equal(fleetStatus, undefined);
 });
 
-void test("card and FleetView render within narrow terminal widths", () => {
+void test("card, FleetView, and inspector preserve line widths in narrow and wide terminals", () => {
   for (const line of renderCard(snapshot(), false, theme).render(32)) assert.ok(visibleWidth(line) <= 32);
   for (const line of fleetLines([snapshot()], 24, theme)) assert.ok(visibleWidth(line) <= 24);
+  const store = {
+    list: () => [snapshot({ task: "x".repeat(500) })],
+    subscribe: () => () => undefined,
+  } as unknown as RunStore;
+  const inspector = new FleetInspector({ requestRender() {} } as never, theme, store, () => undefined);
+  for (const width of [32, 140]) {
+    assert.ok(inspector.render(width).every((line) => visibleWidth(line) <= width));
+  }
+  inspector.dispose();
 });

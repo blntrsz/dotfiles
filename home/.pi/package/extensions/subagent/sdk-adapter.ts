@@ -194,10 +194,10 @@ export class PiChildSessionFactory implements ChildSessionFactory {
           break;
         case "tool_execution_start":
           emit("activity", toolActivity(event.toolName, event.args));
-          emit("tool-start", { name: event.toolName, args: event.args });
+          emit("tool-start", { toolCallId: event.toolCallId, name: event.toolName, args: event.args });
           break;
         case "tool_execution_end":
-          emit("tool-end", { name: event.toolName, isError: event.isError });
+          emit("tool-end", { toolCallId: event.toolCallId, name: event.toolName, isError: event.isError, result: event.result });
           break;
         case "turn_end": {
           if (event.message.role === "assistant") {
@@ -245,8 +245,8 @@ export class PiChildSessionFactory implements ChildSessionFactory {
       dispose() {
         if (disposed) return;
         disposed = true;
-        unsubscribe();
-        session.dispose();
+        try { unsubscribe(); }
+        finally { session.dispose(); }
       },
     };
   }

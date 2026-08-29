@@ -219,6 +219,109 @@ void test("failed injection stays pending and remains consumable by a waiter", a
   assert.equal(result.delivery, "consumed");
 });
 
+void test("teardown winning the injection barrier discards a scheduled Completion", async () => {
+  const scheduled: Array<() => void> = [];
+  const h = harness({ schedule: (fn) => scheduled.push(fn) });
+  const { executionId } = h.launch();
+  await tick();
+  h.sessions[0]!.completion.resolve({ status: "succeeded", text: "undelivered" });
+  await tick();
+  assert.equal(h.registry.inspect(executionId).delivery.state, "pending");
+  const shutdown = h.registry.shutdown();
+  for (const run of scheduled.splice(0)) run();
+  await shutdown;
+  assert.deepEqual(h.injected, []);
+  assert.equal(h.registry.inspect(executionId).delivery.state, "discarded");
+});
+
+void test("projection listener failures cannot turn admitted work into a rejected launch", async () => {
+  const h = harness();
+  let publications = 0;
+  h.registry.subscribe(() => {
+    publications += 1;
+    if (publications > 1) throw new Error("renderer failed");
+  });
+  const launched = h.launch();
+  assert.match(launched.executionId, /^execution-/);
+  await tick();
+  assert.equal(h.registry.inspect(launched.executionId).executionState, "running");
+});
+
+void test("shutdown closes admission, rejects waiters, discards delivery, disposes sessions, and ignores late Child events", async () => {
+  const events: Array<(type: string, data?: unknown) => void> = [];
+  const sessions: ControlledSession[] = [];
+  const scheduled: Array<() => void> = [];
+  const registry = new ChildRegistry({
+    factory: {
+      async create(_request, emit) {
+        events.push(emit);
+        const session = new ControlledSession();
+        sessions.push(session);
+        return session;
+      },
+    },
+    delivery: { inject() { throw new Error("must not inject after shutdown"); } },
+    schedule: (fn) => scheduled.push(fn),
+  });
+  const { executionId } = registry.launch({ task: "work", cwd: "/tmp", model: "test/model", thinkingLevel: "off", tools: [] });
+  await tick();
+  const waiting = registry.wait(executionId);
+  const shutdown = registry.shutdown();
+  await assert.rejects(waiting, (error: unknown) => error instanceof SubagentError && error.code === "parent-closed");
+  await shutdown;
+
+  const closed = registry.inspect(executionId);
+  const eventCount = closed.events.length;
+  assert.equal(closed.executionState, "cancelled");
+  assert.equal(closed.delivery.state, "discarded");
+  assert.equal(sessions[0]?.aborted, true);
+  assert.equal(sessions[0]?.disposed, true);
+  assert.throws(() => registry.launch({ task: "late", cwd: "/tmp", model: "test/model", thinkingLevel: "off", tools: [] }), (error: unknown) => error instanceof SubagentError && error.code === "parent-closed");
+  assert.throws(() => registry.createReusable({ task: "late", cwd: "/tmp", model: "test/model", thinkingLevel: "off", tools: [] }, new AbortController().signal), (error: unknown) => error instanceof SubagentError && error.code === "parent-closed");
+
+  events[0]?.("activity", "late mutation");
+  for (const run of scheduled.splice(0)) run();
+  const retained = registry.inspect(executionId);
+  assert.equal(retained.events.length, eventCount);
+  assert.notEqual(retained.activity, "late mutation");
+});
+
+void test("cleanup diagnostics are retained without preventing logical settlement", async () => {
+  const session = new ControlledSession();
+  session.dispose = () => { session.disposed = true; throw new Error("dispose exploded"); };
+  const registry = new ChildRegistry({
+    factory: { async create() { return session; } },
+    delivery: { inject() {} },
+  });
+  const { executionId } = registry.launch({ task: "work", cwd: "/tmp", model: "test/model", thinkingLevel: "off", tools: [] });
+  await tick();
+  session.completion.resolve({ status: "succeeded", text: "done" });
+  await tick();
+  const retained = registry.inspect(executionId);
+  assert.equal(retained.executionState, "succeeded");
+  assert.equal(session.disposed, true);
+  assert.match(retained.diagnostics?.join("\n") ?? "", /dispose exploded/);
+});
+
+void test("published event data is detached, deeply immutable, and JSON-safe", async () => {
+  let emit!: (type: string, data?: unknown) => void;
+  const h = new ChildRegistry({
+    factory: { async create(_request, callback) { emit = callback; return new ControlledSession(); } },
+    delivery: { inject() {} },
+  });
+  const { executionId } = h.launch({ task: "work", cwd: "/tmp", model: "test/model", thinkingLevel: "off", tools: [] });
+  await tick();
+  const payload: { nested: { value: string }; self?: unknown } = { nested: { value: "original" } };
+  payload.self = payload;
+  emit("activity-detail", payload);
+  payload.nested.value = "mutated";
+  const data = h.inspect(executionId).events.at(-1)?.data as { nested: { value: string }; self: string };
+  assert.deepEqual(data, { nested: { value: "original" }, self: "[Circular]" });
+  assert.equal(Object.isFrozen(data), true);
+  assert.equal(Object.isFrozen(data.nested), true);
+  assert.doesNotThrow(() => JSON.stringify(h.inspect(executionId)));
+});
+
 void test("terminal inspection projections stay within 256 KiB with explicit omissions", async () => {
   const sessions: ControlledSession[] = [];
   const registry = new ChildRegistry({

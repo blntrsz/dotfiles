@@ -84,6 +84,7 @@ interface RecordState {
   activity: string;
   events: NormalizedEvent[];
   eventSequence: number;
+  diagnostics: string[];
   usage: UsageSnapshot;
   createdAt: number;
   startedAt?: number;
@@ -214,7 +215,9 @@ export class ChildRegistry {
           await this.cancel(state.active.executionId).catch(() => undefined);
           await this.wait(state.active.executionId).catch(() => undefined);
         } else if (options.cancel) {
-          await state.session?.abort().catch(() => undefined);
+          await state.session?.abort().catch((error) => {
+            for (const record of state.records) record.diagnostics.push(boundedExcerpt(`abort: ${error instanceof Error ? error.message : String(error)}`));
+          });
         }
         this.closeReusable(state);
         if (state.cleanupError) throw state.cleanupError;
@@ -356,7 +359,8 @@ export class ChildRegistry {
 
   subscribe(listener: (snapshots: readonly ExecutionSnapshot[]) => void): () => void {
     this.listeners.add(listener);
-    listener(this.list());
+    try { listener(this.list()); }
+    catch (error) { this.listeners.delete(listener); throw error; }
     return () => this.listeners.delete(listener);
   }
 
@@ -387,7 +391,9 @@ export class ChildRegistry {
     const cleanup = Promise.allSettled(active.map(async (record) => {
       record.cancelRequested = true;
       record.executionState = "cancelling";
-      await record.session?.abort().catch(() => undefined);
+      await record.session?.abort().catch((error) => {
+        record.diagnostics.push(boundedExcerpt(`abort: ${error instanceof Error ? error.message : String(error)}`));
+      });
     }));
     await Promise.race([
       cleanup,
@@ -421,6 +427,7 @@ export class ChildRegistry {
       activity: "queued",
       events: [],
       eventSequence: 0,
+      diagnostics: [],
       usage: { ...EMPTY_USAGE },
       createdAt: this.now(),
       waiters: [],
@@ -446,7 +453,7 @@ export class ChildRegistry {
           { ...state.request, task: record.request.task, childId: state.childId, executionId: record.executionId },
           (type, data) => {
             const active = state.active;
-            if (active) this.emit(active, type, data);
+            if (active) this.emitChildEvent(active, type, data);
           },
         );
         this.emit(record, "child-created", { reusable: true });
@@ -482,10 +489,11 @@ export class ChildRegistry {
     try {
       const session = await this.options.factory.create(
         { ...record.request, childId: record.childId, executionId: record.executionId },
-        (type, data) => this.emit(record, type, data),
+        (type, data) => this.emitChildEvent(record, type, data),
       );
       if (record.completion || this.closed || record.cancelRequested) {
-        session.dispose();
+        try { session.dispose(); }
+        catch (error) { record.diagnostics.push(boundedExcerpt(`dispose: ${error instanceof Error ? error.message : String(error)}`)); }
         if (!record.completion) {
           this.commit(record, {
             status: "cancelled",
@@ -542,7 +550,10 @@ export class ChildRegistry {
 
   private closeReusable(state: ReusableState): void {
     const wasOpen = state.reserved || state.session !== undefined;
-    try { state.session?.dispose(); } catch (error) { state.cleanupError ??= error; }
+    try { state.session?.dispose(); } catch (error) {
+      state.cleanupError ??= error;
+      for (const record of state.records) record.diagnostics.push(boundedExcerpt(`dispose: ${error instanceof Error ? error.message : String(error)}`));
+    }
     state.session = undefined;
     if (state.reserved) {
       state.reserved = false;
@@ -623,6 +634,7 @@ export class ChildRegistry {
     this.injectionScheduled = true;
     this.schedule(() => {
       this.injectionScheduled = false;
+      if (this.closed) return;
       const eligible = Array.from(this.records.values())
         .filter((record) => record.completion && record.deliveryState === "pending" && record.waiters.length === 0)
         .sort((a, b) => a.completion!.sequence - b.completion!.sequence);
@@ -656,6 +668,8 @@ export class ChildRegistry {
       if (record.completion || record.cancelRequested) throw new SubagentError("inactive-execution", `Execution cannot accept ${kind}`, executionId);
       if (kind === "steer") await record.session!.steer(message);
       else await record.session!.followUp(message);
+      if (this.closed) throw new SubagentError("parent-closed", "Parent runtime closed", executionId);
+      if (record.completion || record.cancelRequested) throw new SubagentError("inactive-execution", `Execution cannot accept ${kind}`, executionId);
       this.emit(record, `${kind}-accepted`);
     });
     const tail = operation.catch(() => undefined).finally(() => {
@@ -670,7 +684,8 @@ export class ChildRegistry {
   private closeChild(record: RecordState): void {
     if (record.childState === "closed") return;
     record.childState = "closing";
-    try { record.session?.dispose(); } catch { /* disposal is diagnostic-only */ }
+    try { record.session?.dispose(); }
+    catch (error) { record.diagnostics.push(boundedExcerpt(`dispose: ${error instanceof Error ? error.message : String(error)}`)); }
     record.session = undefined;
     record.childState = "closed";
     if (record.startedAt !== undefined) this.executing = Math.max(0, this.executing - 1);
@@ -691,6 +706,11 @@ export class ChildRegistry {
     }
   }
 
+  private emitChildEvent(record: RecordState, type: string, data?: unknown): void {
+    if (this.closed || record.completion || record.childState === "closed") return;
+    this.emit(record, type, data);
+  }
+
   private emit(record: RecordState, type: string, data?: unknown): void {
     const event: NormalizedEvent = Object.freeze({
       childId: record.childId,
@@ -698,7 +718,7 @@ export class ChildRegistry {
       sequence: ++record.eventSequence,
       timestamp: this.now(),
       type,
-      data,
+      data: immutableEventData(data),
     });
     record.events.push(event);
     if (record.events.length > 200) record.events.splice(0, record.events.length - 200);
@@ -730,6 +750,7 @@ export class ChildRegistry {
       createdAt: record.createdAt,
       startedAt: record.startedAt,
       completedAt: record.completedAt,
+      diagnostics: record.diagnostics.length ? Object.freeze([...record.diagnostics]) : undefined,
     };
     const encoded = JSON.stringify(base);
     if (Buffer.byteLength(encoded, "utf8") <= LIMITS.inspectionBytes) return Object.freeze(base);
@@ -749,7 +770,10 @@ export class ChildRegistry {
   private publish(): void {
     if (this.listeners.size === 0) return;
     const snapshots = this.list();
-    for (const listener of this.listeners) listener(snapshots);
+    for (const listener of this.listeners) {
+      try { listener(snapshots); }
+      catch { /* Projection listeners are isolated from coordinator settlement. */ }
+    }
   }
 
   private clearWaiter(waiter: Waiter): void {
@@ -772,4 +796,32 @@ export class ChildRegistry {
     for (const record of this.records.values()) if (!record.completion) count += 1;
     return count;
   }
+}
+
+function immutableEventData(data: unknown): unknown {
+  try { return deepFreeze(normalizeEventData(data, new WeakSet<object>())); }
+  catch { return boundedExcerpt(String(data)); }
+}
+
+function normalizeEventData(value: unknown, seen: WeakSet<object>): unknown {
+  if (value === null || value === undefined || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : String(value);
+  if (typeof value === "bigint" || typeof value === "symbol" || typeof value === "function") return String(value);
+  if (typeof value !== "object") return String(value);
+  if (seen.has(value)) return "[Circular]";
+  seen.add(value);
+  if (value instanceof Date) return value.toISOString();
+  if (value instanceof Map) return Array.from(value, ([key, entry]) => [normalizeEventData(key, seen), normalizeEventData(entry, seen)]);
+  if (value instanceof Set) return Array.from(value, (entry) => normalizeEventData(entry, seen));
+  if (ArrayBuffer.isView(value)) return Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+  if (Array.isArray(value)) return value.map((entry) => normalizeEventData(entry, seen));
+  const normalized: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) normalized[key] = normalizeEventData(entry, seen);
+  return normalized;
+}
+
+function deepFreeze<T>(value: T): T {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
+  return Object.freeze(value);
 }

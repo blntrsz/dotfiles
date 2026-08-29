@@ -2,7 +2,7 @@ import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { isKeyRelease, matchesKey, truncateToWidth, visibleWidth, type Component, type TUI } from "@earendil-works/pi-tui";
 import type { ExecutionSnapshot } from "./domain.ts";
 import { fleetLines, fleetRosterLines } from "./render.ts";
-import { RunStore } from "./run-store.ts";
+import { RunController, RunStore } from "./run-store.ts";
 
 const WIDGET_KEY = "subagent-fleet";
 
@@ -13,6 +13,28 @@ function fit(value: string, width: number): string {
 
 function terminalState(snapshot: ExecutionSnapshot): boolean {
   return snapshot.executionState === "succeeded" || snapshot.executionState === "failed" || snapshot.executionState === "cancelled";
+}
+
+function orderedSnapshots(snapshots: readonly ExecutionSnapshot[]): readonly ExecutionSnapshot[] {
+  return Object.freeze([...snapshots].sort((a, b) => {
+    const rank = (snapshot: ExecutionSnapshot) => snapshot.childState === "closed" ? 2 : snapshot.childState === "idle" ? 1 : 0;
+    return rank(a) - rank(b) || a.createdAt - b.createdAt;
+  }));
+}
+
+export function executionControls(snapshot: ExecutionSnapshot): { steer: boolean; wait: boolean; cancel: boolean } {
+  const active = snapshot.executionState === "running" || snapshot.executionState === "starting";
+  return {
+    steer: snapshot.executionState === "running" && snapshot.childState === "executing",
+    wait: true,
+    cancel: active,
+  };
+}
+
+interface InspectorActions {
+  steer(executionId: string): Promise<void>;
+  wait(executionId: string): Promise<void>;
+  cancel(executionId: string): Promise<void>;
 }
 
 function eventLabel(event: ExecutionSnapshot["events"][number]): string {
@@ -32,6 +54,8 @@ export class FleetInspector implements Component {
   private snapshots: readonly ExecutionSnapshot[];
   private selected: number;
   private scroll = 0;
+  private toolsExpanded = false;
+  private notice = "";
   private unsubscribe: () => void;
 
   constructor(
@@ -40,14 +64,15 @@ export class FleetInspector implements Component {
     private readonly store: RunStore,
     private readonly done: (result: undefined) => void,
     initialExecutionId?: string,
+    private readonly actions?: InspectorActions,
   ) {
-    this.snapshots = store.list();
+    this.snapshots = orderedSnapshots(store.list());
     this.selected = Math.max(0, initialExecutionId ? this.snapshots.findIndex((run) => run.executionId === initialExecutionId) : 0);
     this.unsubscribe = store.subscribe((snapshots) => {
       const selectedId = this.snapshots[this.selected]?.executionId;
-      this.snapshots = snapshots;
-      const preserved = selectedId ? snapshots.findIndex((run) => run.executionId === selectedId) : -1;
-      this.selected = preserved >= 0 ? preserved : Math.min(this.selected, Math.max(0, snapshots.length - 1));
+      this.snapshots = orderedSnapshots(snapshots);
+      const preserved = selectedId ? this.snapshots.findIndex((run) => run.executionId === selectedId) : -1;
+      this.selected = preserved >= 0 ? preserved : Math.min(this.selected, Math.max(0, this.snapshots.length - 1));
       this.tui.requestRender();
     });
   }
@@ -78,23 +103,47 @@ export class FleetInspector implements Component {
       this.scroll = Math.max(0, this.scroll - (data === "K" ? 1 : 8));
       return this.tui.requestRender();
     }
-    if (data === "r") this.tui.requestRender();
+    if (data === "t") {
+      this.toolsExpanded = !this.toolsExpanded;
+      return this.tui.requestRender();
+    }
+    if (data === "r") return this.tui.requestRender();
+    const snapshot = this.snapshots[this.selected];
+    if (!snapshot || !this.actions) return;
+    const controls = executionControls(snapshot);
+    const executionId = snapshot.executionId;
+    if (data === "s" && controls.steer) void this.runAction("Steering", () => this.actions!.steer(executionId));
+    if (data === "w" && controls.wait) void this.runAction("Waiting", () => this.actions!.wait(executionId));
+    if (data === "c" && controls.cancel) void this.runAction("Cancellation requested; settlement is cooperative", () => this.actions!.cancel(executionId));
+  }
+
+  private async runAction(notice: string, action: () => Promise<void>): Promise<void> {
+    this.notice = notice;
+    this.tui.requestRender();
+    try {
+      await action();
+      this.notice = `${notice} · done`;
+    } catch (error) {
+      this.notice = error instanceof Error ? error.message : String(error);
+    }
+    this.tui.requestRender();
   }
 
   render(width: number): string[] {
     const height = Math.max(12, Math.min(30, ((this.tui as TUI).terminal?.rows ?? 28) - 4));
-    const innerWidth = Math.max(20, width - 2);
-    const leftWidth = Math.max(22, Math.min(42, Math.floor(innerWidth * 0.36)));
-    const rightWidth = Math.max(20, innerWidth - leftWidth - 1);
+    const innerWidth = Math.max(3, width - 2);
+    const leftWidth = Math.max(1, Math.min(42, Math.floor(innerWidth * 0.36), innerWidth - 2));
+    const rightWidth = Math.max(1, innerWidth - leftWidth - 1);
     const selected = this.snapshots[this.selected];
     const titleState = selected ? `${selected.label} · ${selected.executionState}` : "no executions";
-    const top = `┌${"─".repeat(leftWidth)}┬${"─".repeat(rightWidth)}┐`;
+    const border = (value: string) => this.theme.fg("borderAccent", value);
+    const top = border(`┌${"─".repeat(leftWidth)}┬${"─".repeat(rightWidth)}┐`);
     const title = truncateToWidth(` Subagent fleet inspector · inspection only · live`, leftWidth);
     const selectedTitle = truncateToWidth(` ${titleState}`, rightWidth);
     const lines = [
       top,
-      `│${fit(this.theme.bold(title), leftWidth)}│${fit(this.theme.fg("accent", selectedTitle), rightWidth)}│`,
-      `├${"─".repeat(leftWidth)}┼${"─".repeat(rightWidth)}┤`,
+      `${border("│")}${fit(this.theme.bold(title), leftWidth)}${border("│")}${fit(this.theme.fg("accent", selectedTitle), rightWidth)}${border("│")}`,
+      border(`├${"─".repeat(leftWidth)}┼${"─".repeat(rightWidth)}┤`),
     ];
 
     const roster = this.roster(leftWidth);
@@ -104,21 +153,33 @@ export class FleetInspector implements Component {
     this.scroll = Math.min(this.scroll, maxScroll);
     const visibleDetail = detail.slice(this.scroll, this.scroll + bodyHeight);
     for (let row = 0; row < bodyHeight; row += 1) {
-      lines.push(`│${fit(roster[row] ?? "", leftWidth)}│${fit(visibleDetail[row] ?? "", rightWidth)}│`);
+      lines.push(`${border("│")}${fit(roster[row] ?? "", leftWidth)}${border("│")}${fit(visibleDetail[row] ?? "", rightWidth)}${border("│")}`);
     }
-    lines.push(`├${"─".repeat(leftWidth)}┴${"─".repeat(rightWidth)}┤`);
-    lines.push(`│${fit(this.theme.fg("dim", " ↑/k ↓/j agent · ⇧K/⇧J scroll · PgUp/PgDn page · r refresh · Esc close"), innerWidth)}│`);
-    lines.push(`└${"─".repeat(innerWidth)}┘`);
+    lines.push(border(`├${"─".repeat(leftWidth)}┴${"─".repeat(rightWidth)}┤`));
+    const controls = selected ? executionControls(selected) : { steer: false, wait: false, cancel: false };
+    const keys = ` agent ↑↓ · scroll ⇧K/J · s steer${controls.steer ? "" : " off"} · w wait${controls.wait ? "" : " off"} · c cancel${controls.cancel ? "" : " off"} · t tools · r refresh · Esc close`;
+    lines.push(`${border("│")}${fit(this.theme.fg("dim", this.notice ? ` ${this.notice}` : keys), innerWidth)}${border("│")}`);
+    lines.push(border(`└${"─".repeat(innerWidth)}┘`));
     return lines.map((line) => truncateToWidth(line, width));
   }
 
   private roster(width: number): string[] {
-    if (this.snapshots.length === 0) return [this.theme.fg("dim", " No current-session Children")];
-    return this.snapshots.map((snapshot, index) => {
+    const lines = [this.theme.fg("muted", "   ◉ main · parent")];
+    if (this.snapshots.length === 0) return [...lines, this.theme.fg("dim", " No current-session Children")];
+    const indexed = this.snapshots.map((snapshot, index) => ({ snapshot, index }));
+    const append = ({ snapshot, index }: (typeof indexed)[number], historical = false) => {
       const marker = index === this.selected ? this.theme.fg("accent", ">") : " ";
       const glyph = snapshot.executionState === "running" ? this.theme.fg("accent", "●") : terminalState(snapshot) ? this.theme.fg(snapshot.executionState === "succeeded" ? "success" : "error", snapshot.executionState === "succeeded" ? "✓" : "✗") : this.theme.fg("muted", "◦");
-      return truncateToWidth(`${marker} ${glyph} ${this.theme.bold(snapshot.label)} · ${snapshot.executionState}`, width);
-    });
+      const text = `${marker} ${glyph} ${snapshot.label} · ${snapshot.childState === "idle" ? "idle" : snapshot.executionState}`;
+      lines.push(truncateToWidth(historical ? this.theme.fg("dim", text) : this.theme.bold(text), width));
+    };
+    indexed.filter(({ snapshot }) => snapshot.childState !== "closed").forEach((entry) => append(entry));
+    const history = indexed.filter(({ snapshot }) => snapshot.childState === "closed" && terminalState(snapshot));
+    if (history.length) {
+      lines.push("", this.theme.fg("dim", " Process history"));
+      history.forEach((entry) => append(entry, true));
+    }
+    return lines;
   }
 
   private detail(snapshot: ExecutionSnapshot | undefined, width: number): string[] {
@@ -128,7 +189,8 @@ export class FleetInspector implements Component {
       ` ${this.theme.bold(snapshot.label)} ${this.theme.fg("dim", `· ${snapshot.executionState}`)}`,
       ` ${this.theme.fg("dim", `${snapshot.context} · ${snapshot.model} · ${snapshot.thinkingLevel}`)}`,
       ` ${this.theme.fg("dim", `${usage.input + usage.output} tok · ${usage.turns} turns · ${snapshot.events.filter((event) => event.type === "tool-start").length} tools`)}`,
-      ` ${this.theme.fg("dim", `Child ${snapshot.childId} · Execution ${snapshot.executionId}`)}`,
+      ` ${this.theme.fg("dim", `Child ${snapshot.childId} · Handle ${snapshot.childState === "idle" ? snapshot.childId : "one-shot"}`)}`,
+      ` ${this.theme.fg("dim", `Execution ${snapshot.executionId} · Completion ${snapshot.completion?.sequence ?? "pending"} · Delivery ${snapshot.delivery.state}`)}`,
       ` ${this.theme.fg("muted", `Task  ${snapshot.task}`)}`,
       "",
       ` ${this.theme.fg("accent", "Conversation")}`,
@@ -136,9 +198,16 @@ export class FleetInspector implements Component {
     for (const event of snapshot.events) {
       const glyph = event.type === "tool-end" ? this.theme.fg("success", "✓") : event.type === "tool-start" ? this.theme.fg("accent", "├─") : this.theme.fg("borderMuted", "│");
       lines.push(` ${glyph} ${eventLabel(event)}`);
+      if (this.toolsExpanded && event.type.startsWith("tool-") && event.data !== undefined) {
+        lines.push(...JSON.stringify(event.data, null, 2).split("\n").map((line) => `    ${this.theme.fg("dim", line)}`));
+      }
     }
-    if (snapshot.completion?.text) lines.push("", ...snapshot.completion.text.split("\n").map((line) => ` ${line}`));
+    if (snapshot.completion?.text) lines.push("", ` ${this.theme.fg("accent", "Output")}`, ...snapshot.completion.text.split("\n").map((line) => ` ${line}`));
     if (snapshot.completion?.error) lines.push("", ` ${this.theme.fg("error", `${snapshot.completion.error.code}: ${snapshot.completion.error.message}`)}`);
+    if (snapshot.completion?.diagnosticExcerpt) lines.push(` ${this.theme.fg("warning", snapshot.completion.diagnosticExcerpt)}`);
+    if (snapshot.delivery.diagnostic) lines.push(` ${this.theme.fg("warning", `Pending delivery failure: ${snapshot.delivery.diagnostic}`)}`);
+    if (snapshot.diagnostics?.length) lines.push("", ` ${this.theme.fg("accent", "Diagnostics")}`, ...snapshot.diagnostics.map((diagnostic) => ` ${this.theme.fg("warning", diagnostic)}`));
+    if (snapshot.omitted) lines.push(` ${this.theme.fg("warning", `${snapshot.omitted.events} retained-history events and ${snapshot.omitted.bytes} bytes omitted`)}`);
     return lines.flatMap((line) => {
       if (visibleWidth(line) <= width) return [line];
       const chunks: string[] = [];
@@ -163,10 +232,10 @@ export class SubagentFleetUi {
   private tui: Pick<TUI, "requestRender"> | undefined;
   private timer: ReturnType<typeof setInterval>;
 
-  constructor(private readonly ctx: ExtensionContext, private readonly store: RunStore) {
+  constructor(private readonly ctx: ExtensionContext, private readonly store: RunStore, private readonly controller?: RunController) {
     this.unsubscribeStore = store.subscribe((snapshots) => {
-      this.snapshots = snapshots;
-      this.selected = Math.min(this.selected, snapshots.length);
+      this.snapshots = orderedSnapshots(snapshots);
+      this.selected = Math.min(this.selected, this.snapshots.length);
       const running = snapshots.filter((snapshot) => !terminalState(snapshot)).length;
       ctx.ui.setStatus("subagent-fleet", `subagents: ${running} running`);
       this.refresh();
@@ -250,9 +319,26 @@ export class SubagentFleetUi {
     this.inspectorOpen = true;
     this.refresh();
     try {
-      await this.ctx.ui.custom<undefined>((tui, theme, _keybindings, done) => new FleetInspector(tui, theme, this.store, done, executionId), {
+      const actions: InspectorActions | undefined = this.controller ? {
+        steer: async (stableExecutionId) => {
+          const message = await this.ctx.ui.input(`Steer Execution ${stableExecutionId}`, "Instruction for the running Child");
+          if (message?.trim()) await this.controller!.steer(stableExecutionId, message);
+        },
+        wait: async (stableExecutionId) => {
+          const result = await this.controller!.wait(stableExecutionId);
+          this.ctx.ui.notify(`Execution ${stableExecutionId}: ${result.completion.status}`, "info");
+        },
+        cancel: async (stableExecutionId) => {
+          const confirmed = await this.ctx.ui.confirm(
+            `Cancel Execution ${stableExecutionId}?`,
+            "Cancellation is nonterminal until settlement. Synchronously blocking in-process code cannot be hard-killed.",
+          );
+          if (confirmed) await this.controller!.cancel(stableExecutionId);
+        },
+      } : undefined;
+      await this.ctx.ui.custom<undefined>((tui, theme, _keybindings, done) => new FleetInspector(tui, theme, this.store, done, executionId, actions), {
         overlay: true,
-        overlayOptions: { width: "90%", maxHeight: "80%", anchor: "center" },
+        overlayOptions: { width: "90%", minWidth: 60, maxHeight: "80%", anchor: "center" },
       });
     } finally {
       this.inspectorOpen = false;

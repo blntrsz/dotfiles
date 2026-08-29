@@ -1,5 +1,5 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { Text, truncateToWidth, type Component } from "@earendil-works/pi-tui";
+import { Text, truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import type { ExecutionSnapshot } from "./domain.ts";
 
 function tokens(value: number): string {
@@ -111,12 +111,24 @@ export function renderLiveCard(
 }
 
 export function fleetLines(snapshots: readonly ExecutionSnapshot[], width: number, theme: Theme): string[] {
-  const active = snapshots.filter((run) => run.executionState === "running" || run.executionState === "starting" || run.executionState === "cancelling");
-  if (active.length === 0) return [];
-  const total = active.reduce((sum, run) => sum + run.usage.input + run.usage.output, 0);
-  const label = `${active.length} active agent${active.length === 1 ? "" : "s"}`;
+  if (snapshots.length === 0) return [];
+  const executing = snapshots.filter((run) => run.executionState === "running" || run.executionState === "starting").length;
+  const cancelling = snapshots.filter((run) => run.executionState === "cancelling").length;
+  const idle = snapshots.filter((run) => run.childState === "idle").length;
+  const history = snapshots.filter((run) => run.childState === "closed" && terminalState(run)).length;
+  const pendingDelivery = snapshots.filter((run) => run.delivery.state === "pending" && run.completion).length;
+  const total = snapshots.reduce((sum, run) => sum + run.usage.input + run.usage.output, 0);
+  const active = executing + cancelling;
+  const summary = [
+    `${active} active agent${active === 1 ? "" : "s"}`,
+    executing ? `${executing} executing` : "",
+    cancelling ? `${cancelling} cancelling` : "",
+    idle ? `${idle} idle` : "",
+    history ? `${history} history` : "",
+    pendingDelivery ? `${pendingDelivery} delivery pending` : "",
+  ].filter(Boolean).join(" · ");
   return [truncateToWidth(
-    `  ${theme.fg("muted", label)} · ${theme.fg("dim", `↓ ${tokens(total)} tokens · ↓/← to inspect`)}`,
+    `  ${theme.fg("muted", summary)} · ${theme.fg("dim", `↓ ${tokens(total)} tokens · ↓/← to inspect`)}`,
     width,
     theme.fg("dim", "…"),
   )];
@@ -128,16 +140,31 @@ export function fleetRosterLines(
   width: number,
   theme: Theme,
 ): string[] {
+  const indexed = snapshots.map((snapshot, index) => ({ snapshot, index }));
+  const live = indexed
+    .filter(({ snapshot }) => snapshot.childState !== "closed")
+    .sort((a, b) => Number(a.snapshot.childState === "idle") - Number(b.snapshot.childState === "idle"));
+  const history = indexed.filter(({ snapshot }) => snapshot.childState === "closed" && terminalState(snapshot));
   const lines = [theme.fg("dim", "  ↑↓/jk select · enter inspect · esc back"), "", `${selected === 0 ? theme.fg("accent", ">") : " "} main`];
-  snapshots.forEach((snapshot, index) => {
+  const append = ({ snapshot, index }: (typeof indexed)[number], dim = false) => {
     const presentation = STATE_PRESENTATION[snapshot.executionState];
     const marker = selected === index + 1 ? theme.fg("accent", ">") : " ";
     const elapsed = duration((snapshot.completion?.committedAt ?? Date.now()) - snapshot.createdAt);
     const total = snapshot.usage.input + snapshot.usage.output;
-    const left = `${marker} ${theme.fg(presentation.color, presentation.icon)} ${theme.fg("muted", snapshot.label)}  ${preview(snapshot.task, 72)}`;
-    const right = theme.fg("dim", `${elapsed} · ↓ ${tokens(total)} tokens`);
-    const gap = Math.max(1, width - left.replace(/\x1b\[[0-9;]*m/g, "").length - right.replace(/\x1b\[[0-9;]*m/g, "").length);
+    const label = `${marker} ${theme.fg(presentation.color, presentation.icon)} ${snapshot.label}  ${preview(snapshot.task, 72)}`;
+    const left = dim ? theme.fg("dim", label) : theme.fg("muted", label);
+    const right = theme.fg("dim", `${elapsed} · ↓ ${tokens(total)} tokens · ${snapshot.delivery.state}`);
+    const gap = Math.max(1, width - visibleWidth(left) - visibleWidth(right));
     lines.push(truncateToWidth(`${left}${" ".repeat(gap)}${right}`, width));
-  });
+  };
+  live.forEach((entry) => append(entry));
+  if (history.length > 0) {
+    lines.push("", theme.fg("dim", "  Process history"));
+    history.forEach((entry) => append(entry, true));
+  }
   return lines;
+}
+
+function terminalState(snapshot: ExecutionSnapshot): boolean {
+  return snapshot.executionState === "succeeded" || snapshot.executionState === "failed" || snapshot.executionState === "cancelled";
 }

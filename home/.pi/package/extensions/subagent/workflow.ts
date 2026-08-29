@@ -171,6 +171,7 @@ export class WorkflowInvoker {
   private readonly discovery: (cwd: string, trusted: boolean) => Promise<WorkflowDiscovery>;
   private readonly invocations = new Map<AbortController, Promise<void>>();
   private closed = false;
+  private shutdownPromise?: Promise<void>;
 
   constructor(private readonly options: WorkflowInvokerOptions) {
     this.loader = options.loader ?? new JitiWorkflowLoader();
@@ -258,9 +259,14 @@ export class WorkflowInvoker {
     return provisional!;
   }
 
-  async shutdown(): Promise<void> {
-    if (this.closed) return;
+  shutdown(): Promise<void> {
+    if (this.shutdownPromise) return this.shutdownPromise;
     this.closed = true;
+    this.shutdownPromise = this.performShutdown();
+    return this.shutdownPromise;
+  }
+
+  private async performShutdown(): Promise<void> {
     const active = Array.from(this.invocations.entries());
     for (const [invocation] of active) invocation.abort(new SubagentError("parent-closed", "Parent runtime closed"));
     if (active.length === 0) return;

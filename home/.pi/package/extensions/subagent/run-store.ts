@@ -7,27 +7,29 @@ export class RunStore {
   private readonly listeners = new Set<(snapshots: readonly ExecutionSnapshot[]) => void>();
   private readonly unsubscribeRegistry: () => void;
 
-  constructor(private readonly registry: Pick<ChildRegistry, "inspect" | "list" | "subscribe">) {
+  constructor(private readonly registry: Pick<ChildRegistry, "list" | "subscribe">) {
     this.replace(registry.list());
     this.unsubscribeRegistry = registry.subscribe((snapshots) => {
       this.replace(snapshots);
-      for (const listener of this.listeners) listener(snapshots);
+      for (const listener of this.listeners) {
+        try { listener(this.list()); }
+        catch { /* A failed renderer must not block other projections. */ }
+      }
     });
   }
 
   lookup(executionId: string): ExecutionSnapshot {
     const projected = this.snapshots.get(executionId);
-    if (projected) return projected;
-    const inspected = this.registry.inspect(executionId);
-    this.snapshots.set(executionId, inspected);
-    return inspected;
+    if (!projected) throw new Error(`Unknown execution projection: ${executionId}`);
+    return projected;
   }
 
   list(): readonly ExecutionSnapshot[] { return Object.freeze([...this.snapshots.values()]); }
 
   subscribe(listener: (snapshots: readonly ExecutionSnapshot[]) => void): () => void {
     this.listeners.add(listener);
-    listener(this.list());
+    try { listener(this.list()); }
+    catch (error) { this.listeners.delete(listener); throw error; }
     return () => this.listeners.delete(listener);
   }
 

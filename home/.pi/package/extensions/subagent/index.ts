@@ -178,9 +178,8 @@ export default function subagentExtension(pi: ExtensionAPI) {
     const previous = current;
     current = undefined;
     previous?.fleetUi?.dispose();
-    await previous?.workflows.shutdown();
     previous?.store.dispose();
-    await previous?.registry.shutdown();
+    if (previous) await Promise.allSettled([previous.workflows.shutdown(), previous.registry.shutdown()]);
 
     const factory = new PiChildSessionFactory({
       modelRuntime: canonicalModelRuntime(ctx.modelRegistry),
@@ -219,7 +218,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
     });
     current = { registry, store, controller: new RunController(registry), workflows };
     workflowNames = (await workflows.list()).entries.map((entry) => entry.name);
-    if (ctx.mode === "tui") current.fleetUi = new SubagentFleetUi(ctx, store);
+    if (ctx.mode === "tui") current.fleetUi = new SubagentFleetUi(ctx, store, current.controller);
   });
 
   pi.on("agent_settled", () => current?.registry.retryPendingDelivery());
@@ -227,9 +226,8 @@ export default function subagentExtension(pi: ExtensionAPI) {
     const closing = current;
     current = undefined;
     closing?.fleetUi?.dispose();
-    await closing?.workflows.shutdown();
     closing?.store.dispose();
-    await closing?.registry.shutdown();
+    if (closing) await Promise.allSettled([closing.workflows.shutdown(), closing.registry.shutdown()]);
   });
 
   pi.registerCommand("subagent", {

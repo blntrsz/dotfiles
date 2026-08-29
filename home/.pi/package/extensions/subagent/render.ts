@@ -1,4 +1,4 @@
-import { keyText, type Theme } from "@earendil-works/pi-coding-agent";
+import type { Theme } from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth, type Component } from "@earendil-works/pi-tui";
 import type { ExecutionSnapshot } from "./domain.ts";
 
@@ -66,7 +66,7 @@ export function cardText(snapshot: ExecutionSnapshot, expanded: boolean, theme: 
   ];
 
   if (!expanded && (snapshot.executionState === "running" || snapshot.executionState === "starting" || snapshot.executionState === "cancelling")) {
-    lines.push(theme.fg("accent", `  Press ${keyText("app.tools.expand")} for live detail · Ctrl+Alt+F Fleet`));
+    lines.push(theme.fg("accent", "  Press Ctrl+O for Fleet"));
   }
 
   if (expanded) {

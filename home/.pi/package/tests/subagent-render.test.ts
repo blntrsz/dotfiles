@@ -38,7 +38,7 @@ void test("compact cards match the pi-subagents live-card hierarchy", () => {
   assert.match(lines[0] ?? "", /^● reviewer \(openai\/gpt-5 high\) · ⟳ 2 · 1\.5k token/);
   assert.equal(lines[1], "  task: Review the implementation");
   assert.equal(lines[2], "  ⎿  using read");
-  assert.match(lines[3] ?? "", /Press .* for live detail · Ctrl\+Alt\+F Fleet/);
+  assert.equal(lines[3], "  Press Ctrl+O for Fleet");
 });
 
 void test("expanded cards expose identities, delivery, and terminal diagnostics", () => {
@@ -101,11 +101,13 @@ void test("Fleet inspector uses the reference two-pane live layout", () => {
 void test("Fleet roster activates from the empty editor and opens the selected inspector", async () => {
   let widget: ((tui: never, theme: Theme) => { render(width: number): string[] }) | undefined;
   let inspectorOpened = 0;
+  let fleetStatus: string | undefined;
   const ctx = {
     ui: {
       onTerminalInput: () => () => undefined,
       setWidget: (_key: string, content: typeof widget) => { widget = content; },
       getEditorText: () => "",
+      setStatus: (_key: string, status: string | undefined) => { fleetStatus = status; },
       custom: async (factory: (tui: never, theme: Theme, keys: never, done: (value: undefined) => void) => { dispose?(): void }) => {
         inspectorOpened += 1;
         let done!: (value: undefined) => void;
@@ -125,14 +127,19 @@ void test("Fleet roster activates from the empty editor and opens the selected i
     },
   } as unknown as RunStore;
   const fleet = new SubagentFleetUi(ctx, store);
+  assert.equal(fleetStatus, "subagents: 1 running");
+  assert.equal(fleet.handleInput("\x0f")?.consume, true);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(inspectorOpened, 1);
   assert.equal(fleet.handleInput("\x1b[B")?.consume, true);
   const activeLines = widget?.({ requestRender() {} } as never, theme).render(100) ?? [];
   assert.ok(activeLines.some((line) => line.includes("select · enter inspect")));
   assert.equal(fleet.handleInput("\x1b[B")?.consume, true);
   assert.equal(fleet.handleInput("\r")?.consume, true);
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(inspectorOpened, 1);
+  assert.equal(inspectorOpened, 2);
   fleet.dispose();
+  assert.equal(fleetStatus, undefined);
 });
 
 void test("card and FleetView render within narrow terminal widths", () => {

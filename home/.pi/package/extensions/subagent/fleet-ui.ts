@@ -167,6 +167,8 @@ export class SubagentFleetUi {
     this.unsubscribeStore = store.subscribe((snapshots) => {
       this.snapshots = snapshots;
       this.selected = Math.min(this.selected, snapshots.length);
+      const running = snapshots.filter((snapshot) => !terminalState(snapshot)).length;
+      ctx.ui.setStatus("subagent-fleet", `subagents: ${running} running`);
       this.refresh();
     });
     this.unsubscribeInput = ctx.ui.onTerminalInput((data) => this.handleInput(data));
@@ -178,6 +180,7 @@ export class SubagentFleetUi {
 
   dispose(): void {
     clearInterval(this.timer);
+    this.ctx.ui.setStatus("subagent-fleet", undefined);
     this.unsubscribeStore();
     this.unsubscribeInput();
     this.ctx.ui.setWidget(WIDGET_KEY, undefined);
@@ -200,7 +203,7 @@ export class SubagentFleetUi {
 
   handleInput(data: string): { consume?: boolean; data?: string } | undefined {
     if (isKeyRelease(data) || this.inspectorOpen) return undefined;
-    if (matchesKey(data, "ctrl+alt+f" as Parameters<typeof matchesKey>[1])) {
+    if (matchesKey(data, "ctrl+o" as Parameters<typeof matchesKey>[1])) {
       void this.openInspector(this.snapshots[Math.max(0, this.selected - 1)]?.executionId);
       return { consume: true };
     }

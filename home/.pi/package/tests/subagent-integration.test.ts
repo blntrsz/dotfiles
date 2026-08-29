@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseLaunchArguments } from "../extensions/subagent/index.ts";
+import { parseLaunchArguments, shellWords } from "../extensions/subagent/index.ts";
 import { filterForkMessages } from "../extensions/subagent/sdk-adapter.ts";
 
 void test("command parsing preserves quoted tasks and validates canonical options", () => {
@@ -10,6 +10,16 @@ void test("command parsing preserves quoted tasks and validates canonical option
   );
   assert.throws(() => parseLaunchArguments("--context maybe work"), /fresh or fork/);
   assert.throws(() => parseLaunchArguments("--unknown work"), /Unknown option/);
+});
+
+void test("workflow command parsing passes shell-quoted positional strings without option interpretation", () => {
+  assert.deepEqual(shellWords(`review-branch "two words" '--literal' plain\\ value`), [
+    "review-branch",
+    "two words",
+    "--literal",
+    "plain value",
+  ]);
+  assert.throws(() => shellWords(`review-branch "unfinished`), /Unterminated/);
 });
 
 void test("fork filtering removes orchestration and delivery artifacts without mutating source", () => {

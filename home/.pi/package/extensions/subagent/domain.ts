@@ -94,7 +94,19 @@ export type ErrorCode =
   | "output-overflow"
   | "wait-timeout"
   | "wait-aborted"
-  | "cleanup-grace-exceeded";
+  | "cleanup-grace-exceeded"
+  | "workflow-not-found"
+  | "workflow-source-changed"
+  | "workflow-invalid-export"
+  | "workflow-invalid-result"
+  | "workflow-output-overflow"
+  | "workflow-handle-busy"
+  | "workflow-handle-frozen"
+  | "workflow-cancelled"
+  | "workflow-failed"
+  | "child-missing-text"
+  | "skill-missing"
+  | "skill-ambiguous";
 
 export class SubagentError extends Error {
   readonly name = "SubagentError";

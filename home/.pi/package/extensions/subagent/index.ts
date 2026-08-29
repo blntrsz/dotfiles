@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type {
   ExtensionAPI,
@@ -13,13 +14,17 @@ import { renderCard, renderLiveCard } from "./render.ts";
 import { ChildRegistry, type LaunchRequest } from "./registry.ts";
 import { RunController, RunStore } from "./run-store.ts";
 import { canonicalModelRuntime, PiChildSessionFactory } from "./sdk-adapter.ts";
+import { WorkflowInvoker } from "./workflow.ts";
+import { PiWorkflowBackend } from "./workflow-backend.ts";
 
 const extensionPath = fileURLToPath(import.meta.url);
+const workflowContractPath = join(dirname(extensionPath), "workflow-contract.d.ts");
 
 interface Runtime {
   registry: ChildRegistry;
   store: RunStore;
   controller: RunController;
+  workflows: WorkflowInvoker;
   fleetUi?: SubagentFleetUi;
 }
 
@@ -29,7 +34,7 @@ interface ParsedLaunch {
   task: string;
 }
 
-function shellWords(input: string): string[] {
+export function shellWords(input: string): string[] {
   const words: string[] = [];
   let current = "";
   let quote: "'" | '"' | undefined;
@@ -90,7 +95,7 @@ function forkSnapshot(ctx: ExtensionContext): readonly unknown[] {
   }
 }
 
-async function resolveLaunch(
+export async function resolveLaunch(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   input: { task: string; context?: ContextMode; model?: string; label?: string },
@@ -140,12 +145,17 @@ type ToolInput = Static<typeof ToolParameters>;
 
 export default function subagentExtension(pi: ExtensionAPI) {
   let current: Runtime | undefined;
+  let workflowNames: string[] = [];
   const runtime = (): Runtime => {
     if (!current) throw new SubagentError("parent-closed", "Subagent runtime is not active");
     return current;
   };
 
   pi.registerEntryRenderer("subagent-output", (entry, _options, theme) => {
+    const data = entry.data as { text: string };
+    return new Text(data.text, 0, 0);
+  });
+  pi.registerEntryRenderer("workflow-output", (entry) => {
     const data = entry.data as { text: string };
     return new Text(data.text, 0, 0);
   });
@@ -168,6 +178,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
     const previous = current;
     current = undefined;
     previous?.fleetUi?.dispose();
+    await previous?.workflows.shutdown();
     await previous?.registry.shutdown();
 
     const factory = new PiChildSessionFactory({
@@ -189,7 +200,24 @@ export default function subagentExtension(pi: ExtensionAPI) {
       },
     });
     const store = new RunStore(registry);
-    current = { registry, store, controller: new RunController(registry) };
+    const workflows = new WorkflowInvoker({
+      cwd: ctx.cwd,
+      trusted: () => ctx.isProjectTrusted(),
+      backend: new PiWorkflowBackend({
+        registry,
+        resolve: async (config) => ({
+          ...await resolveLaunch(pi, ctx, {
+            task: `Workflow Handle ${config.label}`,
+            label: config.label,
+            context: "fresh",
+            model: config.model,
+          }),
+          forcedSkills: config.skills,
+        }),
+      }),
+    });
+    current = { registry, store, controller: new RunController(registry), workflows };
+    workflowNames = (await workflows.list()).entries.map((entry) => entry.name);
     if (ctx.mode === "tui") current.fleetUi = new SubagentFleetUi(ctx, store);
   });
 
@@ -198,6 +226,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
     const closing = current;
     current = undefined;
     closing?.fleetUi?.dispose();
+    await closing?.workflows.shutdown();
     await closing?.registry.shutdown();
   });
 
@@ -226,6 +255,62 @@ export default function subagentExtension(pi: ExtensionAPI) {
       const launched = runtime().registry.launch(request);
       const result = await runtime().controller.wait(launched.executionId);
       pi.appendEntry("subagent-output", { text: completionText(result.completion) });
+    },
+  });
+
+  pi.registerCommand("workflow", {
+    description: "Collaboratively author a trusted project-local JavaScript workflow",
+    handler: async (goal, ctx) => {
+      if (!goal.trim()) throw new SubagentError("invalid-arguments", "A workflow goal is required");
+      if (!ctx.isProjectTrusted()) throw new SubagentError("capability-violation", "Project workflows are available only in trusted projects");
+      if (!ctx.isIdle()) throw new SubagentError("inactive-execution", "Wait for the main agent to become idle before authoring a workflow");
+      const discovered = await runtime().workflows.list();
+      const existing = discovered.entries.map((entry) => entry.name).join(", ") || "(none)";
+      pi.sendUserMessage(
+        `Collaboratively author a trusted project-local JavaScript workflow for this goal:\n\n${goal.trim()}\n\n` +
+        `Inspect the project context and direct entries in .pi/workflow/ first. Existing runnable workflows: ${existing}. ` +
+        `Create or edit one kebab-case .js entry. Clearly identify when you edit an existing workflow. Enable JSDoc checking with // @ts-check and use the canonical declaration at ${workflowContractPath}; ` +
+        `copy it to .pi/workflow/workflow.d.ts only when no local declaration exists. Never overwrite an incompatible existing declaration silently. ` +
+        `Use @typedef imports from ./workflow.js (TypeScript resolves workflow.d.ts) and export a default workflow function. ` +
+        `After saving, present the workflow identity, behavior, positional string argument contract, non-whitespace text return contract, and an example /run-workflow invocation. ` +
+        `Do not execute it automatically. Ask once before running the exact saved source and exact arguments; if either changes, ask again.`,
+      );
+    },
+  });
+
+  pi.registerCommand("run-workflow", {
+    description: "Run an authorized trusted project-local JavaScript workflow",
+    getArgumentCompletions(prefix) {
+      const first = prefix.trimStart();
+      if (/\s/.test(first)) return null;
+      const matches = workflowNames.filter((name) => name.startsWith(first));
+      return matches.length ? matches.map((name) => ({ value: name, label: name })) : null;
+    },
+    handler: async (input, _ctx) => {
+      const words = shellWords(input);
+      const name = words.shift();
+      if (!name) throw new SubagentError("invalid-arguments", "Usage: /run-workflow <name> [args...]");
+      const result = await runtime().workflows.invoke(name, words, undefined, "command");
+      pi.appendEntry("workflow-output", { text: result.text });
+    },
+  });
+
+  pi.registerTool({
+    name: "workflow",
+    label: "Workflow",
+    description: "Run one authorized trusted project-local JavaScript workflow. Pass positional strings directly. Returns only the exact successful workflow text. A direct user request is authorization; otherwise ask once before calling, and ask again if source or arguments change.",
+    promptSnippet: "Run an authorized trusted project-local JavaScript workflow",
+    promptGuidelines: [
+      "Use workflow only after a direct user request or one explicit approval for the exact saved source and arguments; changed source or arguments require renewed approval.",
+      "Treat workflow results as the one public value; do not separately inject internal Child outcomes.",
+    ],
+    parameters: Type.Object({
+      name: Type.String({ description: "Kebab-case workflow identity" }),
+      args: Type.Array(Type.String(), { description: "Positional string arguments passed directly to the workflow" }),
+    }),
+    async execute(_toolCallId, params, signal) {
+      const result = await runtime().workflows.invoke(params.name, params.args, signal, "tool");
+      return toolResult(result.text, { name: result.name, digest: result.digest, sourcePath: result.sourcePath, args: result.args });
     },
   });
 

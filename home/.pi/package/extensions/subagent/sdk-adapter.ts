@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type { Model, AssistantMessage } from "@earendil-works/pi-ai";
 import {
   createAgentSession,
@@ -71,6 +72,40 @@ function assistantText(message: AssistantMessage | undefined): string {
   return message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
 }
 
+interface SkillResource {
+  name: string;
+  filePath: string;
+  baseDir: string;
+}
+
+interface SkillDiagnostic {
+  type: string;
+  collision?: { resourceType: string; name: string };
+}
+
+export function forcedSkillsPrompt(
+  selected: readonly string[],
+  resources: { skills: readonly SkillResource[]; diagnostics: readonly SkillDiagnostic[] },
+  load: (path: string) => string = (path) => readFileSync(path, "utf8"),
+): string | undefined {
+  if (selected.length === 0) return undefined;
+  const blocks: string[] = [];
+  for (const name of selected) {
+    const collision = resources.diagnostics.find((diagnostic) =>
+      diagnostic.type === "collision" &&
+      diagnostic.collision?.resourceType === "skill" &&
+      diagnostic.collision.name === name
+    );
+    if (collision) throw new SubagentError("skill-ambiguous", `Forced skill is ambiguous: ${name}`);
+    const matches = resources.skills.filter((skill) => skill.name === name);
+    if (matches.length === 0) throw new SubagentError("skill-missing", `Forced skill is missing: ${name}`);
+    if (matches.length > 1) throw new SubagentError("skill-ambiguous", `Forced skill is ambiguous: ${name}`);
+    const skill = matches[0]!;
+    blocks.push(`<forced_skill name=${JSON.stringify(name)} base_dir=${JSON.stringify(skill.baseDir)}>\n${load(skill.filePath)}\n</forced_skill>`);
+  }
+  return `The following skills are forced for this Child. Follow them in call order and resolve their relative paths from each declared base_dir.\n\n${blocks.join("\n\n")}`;
+}
+
 export interface PiChildSessionFactoryOptions {
   modelRuntime: ModelRuntime;
   projectTrusted: boolean;
@@ -94,6 +129,7 @@ export class PiChildSessionFactory implements ChildSessionFactory {
     });
     const eventBus = createEventBus();
     const marker: ChildRuntimeMarker = Object.freeze({ kind: "subagent-child", childId: request.childId });
+    let forcedSkillPrompt: string | undefined;
     const loader = new DefaultResourceLoader({
       cwd: request.cwd,
       agentDir: getAgentDir(),
@@ -104,6 +140,16 @@ export class PiChildSessionFactory implements ChildSessionFactory {
         ...base,
         extensions: base.extensions.filter((extension) => extension.resolvedPath !== this.options.extensionPath),
       }),
+      skillsOverride: (base) => {
+        try {
+          forcedSkillPrompt = forcedSkillsPrompt(request.forcedSkills ?? [], base);
+        } catch (error) {
+          const normalized = error instanceof SubagentError ? error : new SubagentError("child-startup-failed", String(error));
+          throw new SubagentError(normalized.code, normalized.message, request.executionId);
+        }
+        return base;
+      },
+      appendSystemPromptOverride: (base) => forcedSkillPrompt ? [...base, forcedSkillPrompt] : base,
     });
     await loader.reload();
 

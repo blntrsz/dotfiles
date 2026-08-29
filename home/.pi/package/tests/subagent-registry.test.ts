@@ -147,6 +147,31 @@ void test("cancellation during Child construction never starts the task", async 
   assert.equal(registry.inspect(executionId).executionState, "cancelled");
 });
 
+void test("reusable cancellation during construction retains the constructed Child event", async () => {
+  const construction = deferred<ChildSession>();
+  const session = new ControlledSession();
+  const registry = new ChildRegistry({
+    factory: { create: async () => construction.promise },
+    delivery: { inject() {} },
+  });
+  const request = { task: "work", cwd: "/tmp", model: "test/model", thinkingLevel: "off", tools: [] };
+  const reusable = registry.createReusable(request, new AbortController().signal);
+  const execution = reusable.execute("work");
+  const executionId = registry.list()[0]!.executionId;
+  await registry.cancel(executionId);
+  construction.resolve(session);
+  await assert.rejects(execution, (error: unknown) =>
+    error instanceof SubagentError && error.code === "workflow-cancelled"
+  );
+
+  const events = registry.inspect(executionId).events.map((event) => event.type);
+  const childCreated = events.indexOf("child-created");
+  assert.notEqual(childCreated, -1);
+  assert.ok(childCreated < events.indexOf("completion-committed"));
+  assert.equal(session.disposed, true);
+  await reusable.close();
+});
+
 void test("successful output over 64 KiB becomes a typed failure", async () => {
   const h = harness();
   const { executionId } = h.launch();
@@ -338,7 +363,7 @@ void test("published event data is detached, deeply immutable, and JSON-safe", a
   assert.doesNotThrow(() => JSON.stringify(h.inspect(executionId)));
 });
 
-void test("one-shot and reusable executions classify task-start failures identically", async () => {
+void test("shared task-start settlement preserves each mode's failure diagnostics", async () => {
   const registry = new ChildRegistry({
     factory: {
       async create() {
@@ -360,11 +385,15 @@ void test("one-shot and reusable executions classify task-start failures identic
     error instanceof SubagentError && error.code === "child-execution-failed"
   );
 
-  for (const execution of [registry.inspect(oneShot.executionId), registry.list().at(-1)!]) {
-    assert.equal(execution.executionState, "failed");
-    assert.equal(execution.completion?.error?.code, "child-execution-failed");
-    assert.match(execution.completion?.diagnosticExcerpt ?? "", /start exploded/);
-  }
+  const oneShotFailure = registry.inspect(oneShot.executionId);
+  assert.equal(oneShotFailure.executionState, "failed");
+  assert.equal(oneShotFailure.completion?.error?.code, "child-startup-failed");
+  assert.match(oneShotFailure.completion?.diagnosticExcerpt ?? "", /start exploded/);
+
+  const reusableFailure = registry.list().at(-1)!;
+  assert.equal(reusableFailure.executionState, "failed");
+  assert.equal(reusableFailure.completion?.error?.code, "child-execution-failed");
+  assert.equal(reusableFailure.completion?.diagnosticExcerpt, undefined);
   await reusable.close();
 });
 

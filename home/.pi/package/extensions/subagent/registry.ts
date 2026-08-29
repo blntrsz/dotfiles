@@ -486,6 +486,7 @@ export class ChildRegistry {
     }
 
     record.session = session;
+    if (childCreated && reusable) this.emit(record, "child-created", { reusable: true });
     if (record.completion || this.closed || record.cancelRequested || reusable?.closed) {
       if (!record.completion) {
         this.commit(record, {
@@ -501,12 +502,12 @@ export class ChildRegistry {
     }
 
     record.activity = "working";
-    if (childCreated) this.emit(record, "child-created", reusable ? { reusable: true } : undefined);
+    if (childCreated && !reusable) this.emit(record, "child-created");
     try {
       record.provisional = await session.start(record.request.task);
       this.trySettle(record);
     } catch (error) {
-      this.fail(record, error, "child-execution-failed");
+      this.fail(record, error, reusable ? "child-execution-failed" : "child-startup-failed");
       this.release(record, false);
     }
   }
@@ -518,7 +519,7 @@ export class ChildRegistry {
       status: record.cancelRequested ? "cancelled" : "failed",
       errorCode: normalized.code,
       errorMessage: normalized.message,
-      diagnostic: normalized.message,
+      diagnostic: record.reusable ? undefined : normalized.message,
     });
   }
 

@@ -34,7 +34,11 @@ export function resolveDumpPath(args: string, cwd: string, now = new Date()): st
   return isAbsolute(requested) ? requested : resolve(cwd, requested);
 }
 
-export function serializeCurrentChat(session: SessionReader, now = new Date()): string {
+export function serializeCurrentChat(
+  session: SessionReader,
+  systemPrompt: string,
+  now = new Date(),
+): string {
   const timestamp = now.toISOString();
   const header = {
     type: "session",
@@ -42,6 +46,7 @@ export function serializeCurrentChat(session: SessionReader, now = new Date()): 
     id: session.getSessionId(),
     timestamp,
     cwd: session.getCwd(),
+    systemPrompt,
   };
 
   const lines = [JSON.stringify(header)];
@@ -56,20 +61,25 @@ export function serializeCurrentChat(session: SessionReader, now = new Date()): 
   return `${lines.join("\n")}\n`;
 }
 
-export async function dumpChat(session: SessionReader, outputPath: string, now = new Date()): Promise<void> {
+export async function dumpChat(
+  session: SessionReader,
+  systemPrompt: string,
+  outputPath: string,
+  now = new Date(),
+): Promise<void> {
   await mkdir(dirname(outputPath), { recursive: true });
-  await writeFile(outputPath, serializeCurrentChat(session, now), "utf8");
+  await writeFile(outputPath, serializeCurrentChat(session, systemPrompt, now), "utf8");
 }
 
 export default function dumpChatExtension(pi: ExtensionAPI): void {
   pi.registerCommand("dump-chat", {
-    description: "Dump the current chat branch to a JSONL file",
+    description: "Dump the current chat branch and system prompt to a JSONL file",
     handler: async (args, ctx) => {
       await ctx.waitForIdle();
       const outputPath = resolveDumpPath(args, ctx.cwd);
 
       try {
-        await dumpChat(ctx.sessionManager, outputPath);
+        await dumpChat(ctx.sessionManager, ctx.getSystemPrompt(), outputPath);
         if (ctx.hasUI) ctx.ui.notify(`Chat dumped to ${outputPath}`, "info");
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

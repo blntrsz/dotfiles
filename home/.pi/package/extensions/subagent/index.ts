@@ -8,7 +8,8 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type, type Static } from "typebox";
 import { childToolCeiling } from "./capabilities.ts";
 import { SubagentError, type Completion, type ContextMode, type ExecutionSnapshot } from "./domain.ts";
-import { renderCard, fleetLines } from "./render.ts";
+import { SubagentFleetUi } from "./fleet-ui.ts";
+import { renderCard } from "./render.ts";
 import { ChildRegistry, type LaunchRequest } from "./registry.ts";
 import { RunController, RunStore } from "./run-store.ts";
 import { canonicalModelRuntime, PiChildSessionFactory } from "./sdk-adapter.ts";
@@ -19,7 +20,7 @@ interface Runtime {
   registry: ChildRegistry;
   store: RunStore;
   controller: RunController;
-  unsubscribe?: () => void;
+  fleetUi?: SubagentFleetUi;
 }
 
 interface ParsedLaunch {
@@ -159,7 +160,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
     // barrier so a host cannot overwrite a still-owned runtime.
     const previous = current;
     current = undefined;
-    previous?.unsubscribe?.();
+    previous?.fleetUi?.dispose();
     await previous?.registry.shutdown();
 
     const factory = new PiChildSessionFactory({
@@ -182,21 +183,14 @@ export default function subagentExtension(pi: ExtensionAPI) {
     });
     const store = new RunStore(registry);
     current = { registry, store, controller: new RunController(registry) };
-    if (ctx.mode === "tui") {
-      current.unsubscribe = store.subscribe((snapshots) => {
-        ctx.ui.setWidget("subagent-fleet", (_tui, theme) => ({
-          render: (width) => fleetLines(snapshots, width, theme),
-          invalidate() {},
-        }), { placement: "belowEditor" });
-      });
-    }
+    if (ctx.mode === "tui") current.fleetUi = new SubagentFleetUi(ctx, store);
   });
 
   pi.on("agent_settled", () => current?.registry.retryPendingDelivery());
   pi.on("session_shutdown", async () => {
     const closing = current;
     current = undefined;
-    closing?.unsubscribe?.();
+    closing?.fleetUi?.dispose();
     await closing?.registry.shutdown();
   });
 

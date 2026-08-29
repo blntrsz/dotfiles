@@ -57,6 +57,15 @@ function finalAssistant(messages: readonly AgentMessage[]): AssistantMessage | u
   return undefined;
 }
 
+function toolActivity(name: string, args: unknown): string {
+  if (!args || typeof args !== "object") return name;
+  const values = args as Record<string, unknown>;
+  const detail = values.path ?? values.file_path ?? values.command ?? values.query;
+  if (typeof detail !== "string" || !detail.trim()) return name;
+  const normalized = detail.replace(/\s+/g, " ").trim();
+  return `${name}: ${normalized.length > 120 ? `${normalized.slice(0, 119)}…` : normalized}`;
+}
+
 function assistantText(message: AssistantMessage | undefined): string {
   if (!message) return "";
   return message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
@@ -138,7 +147,7 @@ export class PiChildSessionFactory implements ChildSessionFactory {
           if (event.assistantMessageEvent.type === "text_delta") emit("activity", event.assistantMessageEvent.delta.slice(-240));
           break;
         case "tool_execution_start":
-          emit("activity", `using ${event.toolName}`);
+          emit("activity", toolActivity(event.toolName, event.args));
           emit("tool-start", { name: event.toolName, args: event.args });
           break;
         case "tool_execution_end":

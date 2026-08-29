@@ -3,7 +3,9 @@ import test from "node:test";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import type { ExecutionSnapshot } from "../extensions/subagent/domain.ts";
+import { FleetInspector } from "../extensions/subagent/fleet-ui.ts";
 import { cardText, fleetLines, renderCard } from "../extensions/subagent/render.ts";
+import type { RunStore } from "../extensions/subagent/run-store.ts";
 
 const theme = {
   fg: (_color: string, text: string) => text,
@@ -30,14 +32,13 @@ function snapshot(overrides: Partial<ExecutionSnapshot> = {}): ExecutionSnapshot
   };
 }
 
-void test("compact cards show task, activity, model, thinking, and statistics", () => {
+void test("compact cards match the pi-subagents live-card hierarchy", () => {
   const text = cardText(snapshot(), false, theme);
-  assert.match(text, /reviewer/);
-  assert.match(text, /Review the implementation/);
-  assert.match(text, /using read/);
-  assert.match(text, /openai\/gpt-5 · high/);
-  assert.match(text, /2 turns/);
-  assert.match(text, /↑1.2k/);
+  const lines = text.split("\n");
+  assert.match(lines[0] ?? "", /^● reviewer \(openai\/gpt-5 high\) · ⟳ 2 · 1\.5k token/);
+  assert.equal(lines[1], "  task: Review the implementation");
+  assert.equal(lines[2], "  ⎿  using read");
+  assert.match(lines[3] ?? "", /Press .* for live detail · Ctrl\+Alt\+F Fleet/);
 });
 
 void test("expanded cards expose identities, delivery, and terminal diagnostics", () => {
@@ -53,6 +54,32 @@ void test("expanded cards expose identities, delivery, and terminal diagnostics"
   assert.match(text, /Child ch_1 · Execution ex_1/);
   assert.match(text, /child-execution-failed: provider failed/);
   assert.match(text, /delivery pending: queue unavailable/);
+});
+
+void test("collapsed FleetView matches the pi-subagents inspect affordance", () => {
+  const lines = fleetLines([snapshot()], 120, theme);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0] ?? "", /1 active agent/);
+  assert.match(lines[0] ?? "", /↓ 1\.5k tokens/);
+  assert.match(lines[0] ?? "", /↓\/← to inspect/);
+});
+
+void test("Fleet inspector uses the reference two-pane live layout", () => {
+  const store = {
+    list: () => [snapshot()],
+    subscribe(listener: (runs: readonly ExecutionSnapshot[]) => void) {
+      listener([snapshot()]);
+      return () => undefined;
+    },
+  } as unknown as RunStore;
+  const inspector = new FleetInspector({ requestRender() {} } as never, theme, store, () => undefined);
+  const lines = inspector.render(100);
+  assert.match(lines[1] ?? "", /Subagent fleet inspector/);
+  assert.ok(lines.some((line) => line.includes("Conversation")));
+  assert.ok(lines.some((line) => line.includes("reviewer · running")));
+  assert.match(lines.at(-2) ?? "", /agent.*scroll.*refresh.*close/);
+  assert.ok(lines.every((line) => visibleWidth(line) <= 100));
+  inspector.dispose();
 });
 
 void test("card and FleetView render within narrow terminal widths", () => {

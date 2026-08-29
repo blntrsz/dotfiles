@@ -3,11 +3,43 @@ import type { ChildRegistry, WaitResult } from "./registry.ts";
 
 /** Read-only immutable process-lifetime projection consumed by renderers and inspectors. */
 export class RunStore {
-  constructor(private readonly registry: Pick<ChildRegistry, "inspect" | "list" | "subscribe">) {}
-  lookup(executionId: string): ExecutionSnapshot { return this.registry.inspect(executionId); }
-  list(): readonly ExecutionSnapshot[] { return this.registry.list(); }
+  private readonly snapshots = new Map<string, ExecutionSnapshot>();
+  private readonly listeners = new Set<(snapshots: readonly ExecutionSnapshot[]) => void>();
+  private readonly unsubscribeRegistry: () => void;
+
+  constructor(private readonly registry: Pick<ChildRegistry, "inspect" | "list" | "subscribe">) {
+    this.replace(registry.list());
+    this.unsubscribeRegistry = registry.subscribe((snapshots) => {
+      this.replace(snapshots);
+      for (const listener of this.listeners) listener(snapshots);
+    });
+  }
+
+  lookup(executionId: string): ExecutionSnapshot {
+    const projected = this.snapshots.get(executionId);
+    if (projected) return projected;
+    const inspected = this.registry.inspect(executionId);
+    this.snapshots.set(executionId, inspected);
+    return inspected;
+  }
+
+  list(): readonly ExecutionSnapshot[] { return Object.freeze([...this.snapshots.values()]); }
+
   subscribe(listener: (snapshots: readonly ExecutionSnapshot[]) => void): () => void {
-    return this.registry.subscribe(listener);
+    this.listeners.add(listener);
+    listener(this.list());
+    return () => this.listeners.delete(listener);
+  }
+
+  dispose(): void {
+    this.unsubscribeRegistry();
+    this.listeners.clear();
+    this.snapshots.clear();
+  }
+
+  private replace(snapshots: readonly ExecutionSnapshot[]): void {
+    this.snapshots.clear();
+    for (const snapshot of snapshots) this.snapshots.set(snapshot.executionId, snapshot);
   }
 }
 

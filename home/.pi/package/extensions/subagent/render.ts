@@ -90,11 +90,23 @@ export function renderLiveCard(
   expanded: boolean,
   theme: Theme,
 ): Component {
+  let cachedSnapshot: ExecutionSnapshot | undefined;
+  let cachedWidth: number | undefined;
+  let cachedLines: string[] | undefined;
   return {
     render(width: number): string[] {
-      return new Text(cardText(snapshot(), expanded, theme), 0, 0).render(width);
+      const current = snapshot();
+      if (cachedLines && cachedSnapshot === current && cachedWidth === width) return cachedLines;
+      cachedSnapshot = current;
+      cachedWidth = width;
+      cachedLines = new Text(cardText(current, expanded, theme), 0, 0).render(width);
+      return cachedLines;
     },
-    invalidate() {},
+    invalidate() {
+      cachedSnapshot = undefined;
+      cachedWidth = undefined;
+      cachedLines = undefined;
+    },
   };
 }
 

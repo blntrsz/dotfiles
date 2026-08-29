@@ -179,6 +179,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
     current = undefined;
     previous?.fleetUi?.dispose();
     await previous?.workflows.shutdown();
+    previous?.store.dispose();
     await previous?.registry.shutdown();
 
     const factory = new PiChildSessionFactory({
@@ -227,6 +228,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
     current = undefined;
     closing?.fleetUi?.dispose();
     await closing?.workflows.shutdown();
+    closing?.store.dispose();
     await closing?.registry.shutdown();
   });
 

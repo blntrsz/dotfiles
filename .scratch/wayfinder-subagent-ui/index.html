@@ -3,506 +3,456 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>PROTOTYPE — minimal subagent UI</title>
+  <title>PROTOTYPE — pi-subagents parity</title>
   <style>
     :root {
       color-scheme: dark;
-      --bg: #111114;
-      --panel: #1b1a1f;
-      --panel2: #242229;
-      --border: #53505d;
-      --text: #ebe9ef;
-      --muted: #9c98a5;
-      --dim: #6f6b76;
-      --accent: #73d4e5;
-      --green: #7bd88f;
-      --yellow: #f2ca68;
-      --red: #ff6b7a;
-      --purple: #c5a3ff;
-      --blue: #82aaff;
+      --bg:#18171b;
+      --bg-deep:#111014;
+      --overlay:#222125;
+      --line:#8775b4;
+      --line-dim:#4c4855;
+      --text:#e8e5ec;
+      --muted:#a39da9;
+      --dim:#6e6973;
+      --faint:#4f4a53;
+      --accent:#5fd4e4;
+      --green:#72d68a;
+      --yellow:#e5c568;
+      --red:#ec7080;
+      --blue:#7db4ef;
+      --magenta:#e7418d;
+      --user-bg:#1b2a20;
     }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      background: var(--bg);
-      color: var(--text);
-      font: 14px/1.42 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    }
-    button, input { font: inherit; }
-    button {
-      color: var(--text);
-      background: #2a2830;
-      border: 1px solid var(--border);
-      border-radius: 5px;
-      padding: 5px 9px;
-      cursor: pointer;
-    }
-    button:hover { border-color: var(--accent); }
-    button:disabled { opacity: .38; cursor: not-allowed; border-color: var(--border); }
-    button.danger:hover { border-color: var(--red); color: var(--red); }
-    button.primary { border-color: var(--accent); color: var(--accent); }
-    input {
-      width: 100%;
-      color: var(--text);
-      background: #111114;
-      border: 1px solid var(--border);
-      border-radius: 5px;
-      padding: 7px 9px;
-      outline: none;
-    }
-    input:focus { border-color: var(--accent); }
+    * { box-sizing:border-box; }
+    html,body { margin:0; width:100%; min-height:100%; background:var(--bg); color:var(--text); }
+    body { font:14px/1.34 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace; overflow-x:hidden; }
+    button,input { font:inherit; }
     .prototype-note {
-      padding: 7px 16px;
-      color: var(--yellow);
-      background: #2b2617;
-      border-bottom: 1px solid #5c5026;
-      font-size: 12px;
+      position:fixed; top:8px; right:12px; z-index:50; color:#9b95a0; background:#242228ee;
+      border:1px solid #494550; border-radius:4px; padding:4px 7px; font-size:10px;
     }
-    .app { min-height: calc(100vh - 31px); padding-bottom: 80px; }
-    .variant { display: none; }
-    .variant.active { display: block; }
-    .muted { color: var(--muted); }
-    .dim { color: var(--dim); }
-    .accent { color: var(--accent); }
-    .green { color: var(--green); }
-    .yellow { color: var(--yellow); }
-    .red { color: var(--red); }
-    .purple { color: var(--purple); }
-    .bold { font-weight: 700; color: var(--text); }
-    .dot { color: var(--accent); }
-    .state-chip, .delivery-chip {
-      display: inline-block;
-      padding: 1px 6px;
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      font-size: 11px;
-      color: var(--muted);
+    .terminal { min-height:100vh; padding:18px 24px 28px; background:linear-gradient(180deg,#19181c,#17161a); }
+    .transcript { max-width:1280px; margin:0 auto; padding-bottom:18px; }
+    .line { white-space:pre-wrap; overflow-wrap:anywhere; }
+    .blank { height:1.34em; }
+    .dim { color:var(--dim); }
+    .muted { color:var(--muted); }
+    .faint { color:var(--faint); }
+    .accent { color:var(--accent); }
+    .green { color:var(--green); }
+    .yellow { color:var(--yellow); }
+    .red { color:var(--red); }
+    .blue { color:var(--blue); }
+    .bold { color:#f3f0f5; font-weight:700; }
+    .user-message { margin:10px -24px 14px; padding:8px 24px; background:var(--user-bg); color:#e4eee7; }
+    .assistant { margin:10px 0; color:var(--muted); font-style:italic; }
+    .tool-call { margin:9px 0 2px; }
+    .tool-call .tool-name { color:var(--accent); font-weight:700; }
+    .tool-args { margin-left:2ch; color:var(--dim); }
+
+    /* The real pi-subagents live result is unboxed text in Pi's tool row. */
+    .live-card { margin:3px 0 10px 2ch; padding-left:0; }
+    .live-card .head { color:var(--text); font-weight:700; }
+    .live-card .head .spinner { color:var(--accent); }
+    .live-card .head .model { color:var(--dim); font-weight:400; }
+    .live-card .detail { padding-left:2ch; color:var(--dim); }
+    .live-card .hint { padding-left:2ch; color:var(--accent); }
+    .live-card .expanded { display:none; margin-top:8px; }
+    .live-card.tools-expanded .expanded { display:block; }
+    .live-card .task-label { color:var(--dim); }
+    .tool-event { color:var(--muted); padding-left:2ch; }
+    .tool-event .branch { color:var(--faint); }
+    .tool-event .ok { color:var(--green); }
+    .tool-event .running { color:var(--yellow); }
+    .tool-output { color:var(--dim); padding-left:7ch; }
+
+    .editor-wrap { max-width:1280px; margin:0 auto; }
+    .editor {
+      min-height:58px; border-top:1px solid var(--magenta); border-bottom:1px solid var(--magenta);
+      padding:9px 10px; color:var(--text); cursor:text;
     }
-    .state-chip.running { color: var(--accent); border-color: #346773; }
-    .state-chip.idle, .state-chip.succeeded { color: var(--green); border-color: #386343; }
-    .state-chip.cancelling { color: var(--yellow); border-color: #6c5a27; }
-    .state-chip.cancelled, .state-chip.failed { color: var(--red); border-color: #713642; }
-    .delivery-chip { color: var(--purple); border-color: #5d4e77; }
-    .tool { color: var(--green); }
-    .shell { color: var(--blue); }
-    .divider { height: 1px; background: var(--border); }
-    .surface-title { color: var(--dim); text-transform: uppercase; letter-spacing: .12em; font-size: 11px; }
+    .cursor { display:inline-block; width:7px; height:15px; vertical-align:-2px; background:#e6e3e8; }
 
-    /* Shared transcript fragments */
-    .transcript { padding: 18px 24px 8px; max-width: 1120px; margin: 0 auto; }
-    .user-line { margin: 12px 0; color: var(--text); }
-    .assistant-line { margin: 12px 0; color: var(--muted); }
-    .run-card {
-      margin: 14px 0;
-      padding: 10px 12px;
-      border-left: 2px solid var(--accent);
-      background: linear-gradient(90deg, #1a2023, transparent 75%);
+    /* FleetView follows pi-subagents: plain widget text directly below the editor. */
+    .fleet { padding:9px 9px 7px; min-height:30px; color:var(--muted); user-select:none; }
+    .fleet.compact { cursor:pointer; }
+    .fleet .expanded-roster { display:none; }
+    .fleet.open .compact-line { display:none; }
+    .fleet.open .expanded-roster { display:block; }
+    .fleet-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:2ch; white-space:nowrap; }
+    .fleet-left { overflow:hidden; text-overflow:ellipsis; }
+    .fleet-right { color:var(--dim); }
+    .fleet-row.selected .fleet-left { color:var(--text); }
+    .fleet-row.selected .marker { color:var(--accent); }
+    .fleet-help { color:var(--dim); margin-bottom:8px; }
+    .fleet-section { color:var(--dim); margin-top:5px; }
+    .statusline { padding-top:2px; color:var(--dim); }
+    .statusline .brand { color:var(--accent); font-weight:700; }
+    .statusline .branch { color:var(--green); }
+
+    /* Exact structural copy of the existing centered 95% fleet overlay. */
+    .overlay-backdrop {
+      display:none; position:fixed; inset:0; z-index:20; background:rgba(15,14,17,.30);
+      align-items:flex-start; justify-content:center; padding:18px 24px 74px;
     }
-    .run-card .headline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .run-card .activity { margin: 7px 0 2px 18px; color: var(--muted); }
-    .run-card .task { margin: 6px 0 0 18px; color: var(--dim); }
-    .run-card .tools { margin: 8px 0 0 18px; color: var(--muted); }
-    .tool-detail { display: none; margin: 4px 0 0 22px; color: var(--dim); white-space: pre-wrap; }
-    .tools-expanded .tool-detail { display: block; }
-    .card-actions { display: flex; gap: 7px; margin: 9px 0 0 18px; flex-wrap: wrap; }
-
-    /* A: parity trimmed */
-    .a-layout { min-height: calc(100vh - 31px); display: grid; grid-template-rows: 1fr auto auto; }
-    .a-editor { max-width: 1120px; width: calc(100% - 48px); margin: 8px auto 0; border: 1px solid #9b2f69; min-height: 54px; padding: 10px; }
-    .fleet-strip { max-width: 1120px; width: calc(100% - 48px); margin: 0 auto; padding: 8px 10px; color: var(--muted); }
-    .fleet-strip.expandable { cursor: pointer; }
-    .fleet-roster { display: none; padding: 7px 0 0 18px; }
-    .fleet-strip.open .fleet-roster { display: block; }
-    .fleet-row { display: flex; justify-content: space-between; gap: 14px; padding: 2px 0; }
-    .fleet-row.selected { color: var(--accent); }
-
-    /* B: lifecycle ledger */
-    .b-header { padding: 14px 22px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; gap: 14px; align-items: center; }
-    .b-layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; min-height: calc(100vh - 84px); }
-    .b-main { border-right: 1px solid var(--border); }
-    .b-main .transcript { margin: 0; }
-    .ledger { padding: 16px; background: #151419; }
-    .child-block { border: 1px solid var(--border); margin: 10px 0; background: var(--panel); }
-    .child-head { padding: 9px 10px; display: flex; justify-content: space-between; gap: 8px; }
-    .execution { padding: 9px 10px 9px 24px; border-top: 1px solid #37343d; cursor: pointer; }
-    .execution:hover, .execution.selected { background: var(--panel2); }
-    .execution-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 5px; }
-    .b-actions { padding: 11px 10px; border-top: 1px solid #37343d; display: flex; gap: 7px; flex-wrap: wrap; }
-
-    /* C: command center */
-    .c-layout { display: grid; grid-template-columns: 250px minmax(380px, 1fr) 330px; min-height: calc(100vh - 31px); }
-    .c-column { border-right: 1px solid var(--border); min-width: 0; }
-    .c-column:last-child { border-right: 0; }
-    .c-title { padding: 12px 14px; border-bottom: 1px solid var(--border); background: #17161a; }
-    .c-list { padding: 8px; }
-    .c-item { padding: 10px; margin-bottom: 5px; border: 1px solid transparent; cursor: pointer; }
-    .c-item:hover, .c-item.selected { background: var(--panel); border-color: var(--border); }
-    .timeline { padding: 14px 16px; }
-    .event { position: relative; border-left: 1px solid var(--border); padding: 0 0 16px 18px; }
-    .event::before { content: ""; position: absolute; left: -4px; top: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
-    .event.live::before { background: var(--accent); box-shadow: 0 0 0 4px #20404a; }
-    .event-time { color: var(--dim); font-size: 11px; }
-    .event-detail { color: var(--muted); margin-top: 4px; white-space: pre-wrap; }
-    .control-panel { padding: 14px; }
-    .control-panel h3 { font-size: 13px; margin: 16px 0 7px; }
-    .control-panel h3:first-child { margin-top: 0; }
-    .control-stack { display: grid; gap: 7px; }
-    .state-dump { margin-top: 16px; padding: 10px; background: #0d0d0f; border: 1px solid #33313a; color: var(--dim); font-size: 11px; white-space: pre-wrap; }
-
-    /* Inspector shared modal */
-    .modal-backdrop { display: none; position: fixed; inset: 31px 0 0; background: rgba(0,0,0,.66); z-index: 10; padding: 3vh 3vw 90px; }
-    .modal-backdrop.open { display: block; }
-    .inspector { height: 100%; border: 1px solid var(--purple); background: #161519; display: grid; grid-template-rows: auto 1fr auto; box-shadow: 0 14px 50px #000; }
-    .inspector-head, .inspector-foot { padding: 8px 11px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; gap: 10px; }
-    .inspector-foot { border-bottom: 0; border-top: 1px solid var(--border); color: var(--dim); font-size: 12px; }
-    .inspector-body { display: grid; grid-template-columns: 34% 66%; min-height: 0; }
-    .inspector-list { border-right: 1px solid var(--border); padding: 8px; overflow: auto; }
-    .inspector-detail { padding: 12px 14px; overflow: auto; }
-    .inspect-row { padding: 7px 8px; cursor: pointer; }
-    .inspect-row.selected, .inspect-row:hover { background: var(--panel2); }
-    .history-separator { margin: 12px 0 5px; color: var(--dim); text-transform: uppercase; font-size: 10px; letter-spacing: .1em; }
-    .steer-box { display: none; margin: 10px 0; padding: 10px; border: 1px solid var(--accent); background: #152025; }
-    .steer-box.open { display: block; }
-    .steer-box .row { display: flex; gap: 7px; margin-top: 7px; }
-
-    /* Prototype switcher */
-    .switcher {
-      position: fixed;
-      z-index: 20;
-      left: 50%;
-      bottom: 16px;
-      transform: translateX(-50%);
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 8px 10px;
-      background: #f0eef5;
-      color: #17151a;
-      border-radius: 999px;
-      box-shadow: 0 5px 24px #000b;
-      white-space: nowrap;
+    .overlay-backdrop.open { display:flex; }
+    .inspector {
+      margin-top:0; width:min(95vw,1380px); height:min(85vh,720px); min-width:700px;
+      display:grid; grid-template-rows:auto 1fr auto; color:var(--text); background:var(--overlay);
+      border:1px solid var(--line); border-radius:3px; box-shadow:0 15px 50px #0007;
     }
-    .switcher button { background: #d8d4df; color: #17151a; border-color: #aaa4b4; border-radius: 999px; }
-    .switcher-label { min-width: 250px; text-align: center; font-weight: 700; }
-    .scenario-bar { position: fixed; right: 14px; bottom: 18px; z-index: 19; display: flex; gap: 6px; }
+    .inspector-header {
+      min-height:31px; padding:6px 10px; display:grid; grid-template-columns:1fr auto; gap:2ch;
+      border-bottom:1px solid var(--line); white-space:nowrap;
+    }
+    .inspector-title { font-weight:700; }
+    .inspector-title .subtitle { color:var(--dim); font-weight:400; }
+    .inspector-current { text-align:right; }
+    .inspector-body { min-height:0; display:grid; grid-template-columns:36% 64%; }
+    .roster { min-width:0; overflow:hidden; border-right:1px solid var(--line); padding:5px 7px; }
+    .roster-row {
+      display:grid; grid-template-columns:minmax(0,1fr) auto; gap:1ch; padding:2px 4px;
+      white-space:nowrap; cursor:pointer;
+    }
+    .roster-row:hover,.roster-row.selected { background:#2b2930; }
+    .roster-row .left { overflow:hidden; text-overflow:ellipsis; }
+    .roster-row .right { color:var(--dim); }
+    .roster-row .arrow { color:var(--accent); }
+    .roster-row .glyph.running { color:var(--accent); }
+    .roster-row .glyph.idle,.roster-row .glyph.succeeded { color:var(--green); }
+    .roster-row .glyph.cancelled,.roster-row .glyph.failed { color:var(--red); }
+    .roster-label { font-weight:700; }
+    .roster-task { color:var(--dim); }
+    .roster-separator { margin:9px 4px 3px; color:var(--faint); }
 
-    @media (max-width: 900px) {
-      .b-layout { grid-template-columns: 1fr; }
-      .b-main { border-right: 0; }
-      .ledger { border-top: 1px solid var(--border); }
-      .c-layout { grid-template-columns: 210px 1fr; }
-      .c-layout .c-column:last-child { grid-column: 1 / -1; border-top: 1px solid var(--border); }
-      .inspector-body { grid-template-columns: 1fr; }
-      .inspector-list { display: none; }
-      .scenario-bar { display: none; }
+    .detail-pane { min-width:0; overflow:auto; padding:5px 8px 14px; }
+    .detail-head { display:grid; grid-template-columns:1fr auto; gap:2ch; white-space:nowrap; }
+    .detail-head .who { font-weight:700; }
+    .detail-meta { color:var(--dim); }
+    .detail-stats { color:var(--dim); }
+    .conversation-label { margin-top:2px; color:var(--accent); }
+    .conversation-label .sub { color:var(--dim); }
+    .conversation { margin-top:4px; }
+    .conversation .role { font-weight:700; }
+    .rail { border-left:1px solid var(--line-dim); padding:0 0 0 1.1ch; margin:2px 0 4px .45ch; }
+    .rail .event { margin:2px 0; }
+    .rail .event-title { color:var(--accent); font-weight:700; }
+    .rail .event-args { color:var(--dim); }
+    .rail .event-output { color:var(--muted); }
+    .earlier { color:var(--dim); margin:3px 0; }
+    .tool-detail-lines { display:none; }
+    .inspector.tools-expanded .tool-detail-lines { display:block; }
+    .action-area { display:none; margin-bottom:7px; color:var(--accent); }
+    .action-area.open { display:block; }
+    .action-area input {
+      width:calc(100% - 2ch); padding:2px 0; color:var(--text); background:transparent;
+      border:0; border-bottom:1px solid var(--accent); outline:none;
+    }
+    .action-help { color:var(--dim); }
+    .notice { color:var(--green); margin-bottom:6px; }
+    .notice.error { color:var(--red); }
+    .inspector-footer {
+      min-height:31px; border-top:1px solid var(--line); padding:6px 10px;
+      display:grid; grid-template-columns:minmax(0,1fr) auto; gap:2ch; color:var(--dim); white-space:nowrap;
+    }
+    .inspector-footer .bindings { overflow:hidden; text-overflow:ellipsis; }
+
+    /* Prototype-only scenario control is visually outside the TUI decision. */
+    .scenario-switcher {
+      position:fixed; z-index:60; left:50%; bottom:14px; transform:translateX(-50%);
+      display:flex; align-items:center; gap:7px; padding:7px 9px; border-radius:999px;
+      color:#222027; background:#efedf2; box-shadow:0 5px 24px #0008;
+    }
+    .scenario-switcher button {
+      border:1px solid #aaa5ae; border-radius:999px; background:#d9d6dd; color:#222027;
+      padding:4px 9px; cursor:pointer;
+    }
+    .scenario-switcher button.active { background:#27242c; color:#f1eef4; border-color:#27242c; }
+    .scenario-switcher .label { font-weight:700; margin-right:2px; }
+    @media (max-width:800px) {
+      .terminal { padding-left:12px; padding-right:12px; }
+      .user-message { margin-left:-12px; margin-right:-12px; padding-left:12px; padding-right:12px; }
+      .inspector { min-width:0; width:100%; }
+      .inspector-body { grid-template-columns:42% 58%; }
+      .prototype-note { display:none; }
     }
   </style>
 </head>
 <body>
-  <div class="prototype-note">THROWAWAY PROTOTYPE — Three structural adaptations of pi-subagents UI, switchable via <code>?variant=A|B|C</code>. All state is simulated in memory.</div>
-  <main class="app">
-    <!-- A: preserve current mental model, remove unsupported concepts -->
-    <section class="variant" data-variant="A">
-      <div class="a-layout">
-        <div class="transcript">
-          <div class="surface-title">Conversation</div>
-          <div class="user-line">Use a subagent to review the cancellation path.</div>
-          <div class="assistant-line">I’ll ask a fresh child to inspect it while we continue.</div>
-          <div class="run-card" data-live-card>
-            <div class="headline">
-              <span class="dot">●</span>
-              <span class="bold">Cancellation review</span>
-              <span class="state-chip running" data-execution-state>running</span>
-              <span class="dim">· child ch_7f2a · execution ex_02 · fresh · 1m 12s · 3.1k tokens</span>
-            </div>
-            <div class="task">task: Trace cancellation from parent request through settled completion.</div>
-            <div class="activity" data-activity>⎿ <span class="tool">read</span> home/.pi/agent/extensions/subagent/runtime.ts · 4s</div>
-            <div class="tools">
-              ├─ <span class="green">✓</span> read runtime.ts
-              <div class="tool-detail">Read 418 lines. Found cancellation arbitration in settleExecution().</div>
-              └─ <span class="yellow">●</span> <span class="shell">bash</span> rg "cancell" test/
-              <div class="tool-detail">test/cancellation.test.ts:18: describe("cancellation")</div>
-            </div>
-            <div class="card-actions">
-              <button data-action="toggle-tools">Ctrl+O details</button>
-              <button data-action="open-inspector">Inspect</button>
-              <button data-action="steer">Steer</button>
-              <button data-action="wait">Wait</button>
-              <button class="danger" data-action="cancel">Cancel</button>
-            </div>
-          </div>
-          <div class="assistant-line">The child is still running. We can inspect, steer, wait, or cancel it without introducing a separate async-run concept.</div>
+  <div class="prototype-note">THROWAWAY PROTOTYPE · visual parity with ~/Projects/pi-subagents</div>
+  <main class="terminal" tabindex="0" data-terminal>
+    <section class="transcript">
+      <div class="line dim">The extension is loaded. One generic subagent mechanism; labels are display metadata.</div>
+      <div class="user-message">Use a subagent to review cancellation and steering races. Keep working while it runs.</div>
+      <div class="assistant">I’ll start a fresh child and keep it visible while we continue.</div>
+      <div class="tool-call"><span class="tool-name">subagent</span> <span class="dim">{ label: “Reviewer”, context: “fresh”, task: “Review cancellation and steering races…” }</span></div>
+      <div class="live-card" data-live-card>
+        <div class="head"><span class="spinner" data-card-glyph>●</span> <span data-card-label>Reviewer</span> <span class="model">(openai/gpt-5.4 medium) · <span data-card-stats>3 tools · 5.7k tok · 50s</span></span></div>
+        <div class="detail">task: Review cancellation and steering races in the proposed minimal subagent lifecycle.</div>
+        <div class="detail">⎿  <span data-card-activity>bash · rg "cancel|steer" home/.pi/agent/extensions</span></div>
+        <div class="hint" data-card-hint>Ctrl+O live detail · Ctrl+Alt+F Fleet</div>
+        <div class="expanded">
+          <div class="blank"></div>
+          <div class="line dim">Task: Review cancellation and steering races in the proposed minimal subagent lifecycle.</div>
+          <div class="blank"></div>
+          <div class="tool-event"><span class="branch">├─</span> <span class="ok">✓</span> <span class="accent">read</span> home/.pi/agent/extensions/subagent/runtime.ts</div>
+          <div class="tool-output">Found settleExecution() and requestCancellation().</div>
+          <div class="tool-event"><span class="branch">└─</span> <span class="running">●</span> <span class="blue">bash</span> rg "cancel|steer" home/.pi/agent/extensions</div>
+          <div class="tool-output">9 matches · current tool 4s</div>
+          <div class="blank"></div>
+          <div class="line muted">I’m checking which acknowledgement the parent can render before terminal settlement.</div>
         </div>
-        <div class="fleet-strip expandable" data-fleet>
-          <div data-fleet-summary><span class="dot">●</span> 1 executing · 1 idle · 3 completed this process · 9.4k tokens · ↓/← to inspect</div>
-          <div class="fleet-roster">
-            <div class="dim">↑↓/jk select · enter inspect · esc back</div>
-            <div class="fleet-row"><span>  main</span><span></span></div>
-            <div class="fleet-row selected"><span>› ● Cancellation review · running</span><span>1m 12s · 3.1k</span></div>
-            <div class="fleet-row"><span>  ○ Release notes · idle</span><span>child ch_3b91</span></div>
-            <div class="fleet-row dim"><span>  ✓ API scan · succeeded · consumed</span><span>4m ago · 2.2k</span></div>
-          </div>
-        </div>
-        <div class="a-editor">Type a message…<span class="dim">▌</span></div>
       </div>
+      <div class="assistant">The child is live. I can inspect it, steer it, wait for its completion, or cancel it.</div>
+      <div class="tool-call"><span class="tool-name">read</span> <span class="dim">home/.pi/agent/extensions/subagent/runtime.ts</span></div>
+      <div class="line muted">Read 418 lines.</div>
     </section>
 
-    <!-- B: make canonical lifecycle concepts visible -->
-    <section class="variant" data-variant="B">
-      <header class="b-header">
-        <div><span class="bold">pi</span> <span class="dim">· minimal subagents</span></div>
-        <div><span class="accent">1 executing</span> · <span class="green">1 idle child</span> · <span class="muted">history: 3 executions</span></div>
-      </header>
-      <div class="b-layout">
-        <div class="b-main">
-          <div class="transcript">
-            <div class="surface-title">Conversation with live execution cards</div>
-            <div class="user-line">Have Reviewer check the lifecycle decision, then remember the feedback for a follow-up.</div>
-            <div class="run-card" data-live-card>
-              <div class="headline">
-                <span class="dot">●</span><span class="bold">Reviewer</span>
-                <span class="state-chip running" data-execution-state>running</span>
-                <span class="dim">execution 2 on reusable child · fresh</span>
-              </div>
-              <div class="task">Handle label is presentation only. The stable controls target <span class="purple">ex_02</span>.</div>
-              <div class="activity" data-activity>⎿ reasoning · “The Delivery state should remain separate…”</div>
-              <div class="card-actions">
-                <button data-action="steer">Steer</button>
-                <button data-action="wait">Wait & consume</button>
-                <button class="danger" data-action="cancel">Cancel execution</button>
-              </div>
-            </div>
-            <div class="assistant-line">The right ledger keeps Child, Execution, Completion, and Delivery distinct; the transcript stays concise.</div>
-          </div>
+    <section class="editor-wrap">
+      <div class="editor" data-editor><span class="cursor"></span></div>
+      <div class="fleet compact" data-fleet>
+        <div class="compact-line"><span class="accent">●</span> <span data-fleet-compact>1 active agent · 1 idle · 3 completed this process · ↓ 3.1k window · 5.7k spent · ↓/← to inspect</span></div>
+        <div class="expanded-roster">
+          <div class="fleet-help">↑↓/jk select · enter inspect · esc back</div>
+          <div class="fleet-row" data-fleet-row="main"><span class="fleet-left"><span class="marker">›</span> main</span><span></span></div>
+          <div class="fleet-row" data-fleet-row="reviewer"><span class="fleet-left"><span class="marker"> </span> <span class="accent">●</span> Reviewer · <span data-fleet-state>running</span></span><span class="fleet-right">50s · ↓ 3.1k window · 5.7k spent</span></div>
+          <div class="fleet-row" data-fleet-row="writer"><span class="fleet-left"><span class="marker"> </span> <span class="green">○</span> Writer · idle</span><span class="fleet-right">child ch_39df</span></div>
+          <div class="fleet-section">  process history</div>
+          <div class="fleet-row" data-fleet-row="api"><span class="fleet-left"><span class="marker"> </span> <span class="green">✓</span> API scan · succeeded · consumed</span><span class="fleet-right">4m · 2.2k spent</span></div>
+          <div class="fleet-row" data-fleet-row="tests"><span class="fleet-left"><span class="marker"> </span> <span class="red">■</span> Test diagnosis · cancelled</span><span class="fleet-right">9m · 1.5k spent</span></div>
         </div>
-        <aside class="ledger">
-          <div class="surface-title">Process-lifetime ledger</div>
-          <div class="child-block">
-            <div class="child-head"><span><span class="dot">●</span> <b>Reviewer</b> <span class="dim">ch_7f2a</span></span><span class="state-chip running">executing</span></div>
-            <div class="execution selected"><b>Execution 2</b> <span class="dim">ex_02 · now</span><div class="execution-meta"><span class="state-chip running" data-execution-state>running</span><span class="delivery-chip" data-delivery>pending delivery</span></div></div>
-            <div class="execution"><b>Execution 1</b> <span class="dim">ex_01 · 6m ago</span><div class="execution-meta"><span class="state-chip succeeded">succeeded</span><span class="delivery-chip">consumed</span></div></div>
-            <div class="b-actions"><button data-action="open-inspector">Open detail</button><button data-action="steer">Steer</button><button data-action="wait">Wait</button><button class="danger" data-action="cancel">Cancel</button></div>
-          </div>
-          <div class="child-block">
-            <div class="child-head"><span><span class="green">○</span> <b>Release notes</b> <span class="dim">ch_3b91</span></span><span class="state-chip idle">idle</span></div>
-            <div class="execution"><b>Execution 1</b> <span class="dim">ex_09 · 12m ago</span><div class="execution-meta"><span class="state-chip succeeded">succeeded</span><span class="delivery-chip">injected</span></div></div>
-          </div>
-          <div class="dim">History is observation-only, survives one-shot child closure, and disappears on parent-session teardown.</div>
-        </aside>
       </div>
-    </section>
-
-    <!-- C: inspector is the primary control surface -->
-    <section class="variant" data-variant="C">
-      <div class="c-layout">
-        <section class="c-column">
-          <div class="c-title"><b>Runs</b> <span class="dim">· this process</span></div>
-          <div class="c-list">
-            <div class="surface-title">Live</div>
-            <div class="c-item selected"><span class="dot">●</span> Cancellation review<div class="dim">ex_02 · running · 3.1k</div></div>
-            <div class="c-item"><span class="green">○</span> Release notes<div class="dim">ch_3b91 · idle</div></div>
-            <div class="surface-title" style="margin-top:16px">History</div>
-            <div class="c-item"><span class="green">✓</span> API scan<div class="dim">succeeded · consumed</div></div>
-            <div class="c-item"><span class="red">■</span> Test diagnosis<div class="dim">cancelled · discarded</div></div>
-          </div>
-        </section>
-        <section class="c-column">
-          <div class="c-title"><b>Cancellation review</b> <span class="dim">· execution ex_02 · live timeline</span></div>
-          <div class="timeline">
-            <div class="event"><div class="event-time">14:02:11</div><b>Execution starting</b><div class="event-detail">Fresh child ch_7f2a · model inherited · capability snapshot frozen</div></div>
-            <div class="event"><div class="event-time">14:02:12</div><b>Execution running</b><div class="event-detail">Task accepted. Delivery is pending.</div></div>
-            <div class="event"><div class="event-time">14:02:25</div><b class="tool">read</b> <span class="dim">runtime.ts</span><div class="event-detail">✓ 418 lines · 0.8s</div></div>
-            <div class="event"><div class="event-time">14:02:42</div><b class="shell">bash</b> <span class="dim">rg "cancell" test/</span><div class="event-detail">✓ 9 matches · 0.2s</div></div>
-            <div class="event live"><div class="event-time">now</div><b class="accent" data-timeline-state>Reasoning</b><div class="event-detail" data-timeline-detail>The cancellation request and the child’s settlement can race; control should acknowledge the request, not claim the terminal result yet.</div></div>
-          </div>
-        </section>
-        <aside class="c-column control-panel">
-          <h3>Control this execution</h3>
-          <div class="control-stack">
-            <button class="primary" data-action="steer">Steer…</button>
-            <button data-action="wait">Wait and consume completion</button>
-            <button class="danger" data-action="cancel">Cancel execution</button>
-            <button data-action="toggle-tools">Toggle tool detail</button>
-          </div>
-          <h3>Canonical state</h3>
-          <div><span class="state-chip running" data-execution-state>running</span> <span class="delivery-chip" data-delivery>pending</span></div>
-          <div class="state-dump" data-state-dump>Child       ch_7f2a  executing
-Handle      h_7f2a   open, frozen
-Execution   ex_02    running
-Completion  —        not settled
-Delivery    —        not created
-Context     fresh
-Lifetime    parent process</div>
-          <h3>Why this variant</h3>
-          <div class="muted">Treats the inspector as a debugger/control room. The transcript can reduce live cards to one line, while every state transition remains inspectable here.</div>
-        </aside>
-      </div>
+      <div class="statusline"><span class="brand">subagents</span> <span class="branch">git:(prototype/minimal-subagent-ui)</span> <span class="dim">· openai/gpt-5.4 medium</span></div>
     </section>
   </main>
 
-  <div class="modal-backdrop" data-modal>
-    <div class="inspector">
-      <div class="inspector-head"><span><b>Subagent inspector</b> <span class="dim">· process-lifetime history · live controls</span></span><span><span class="dot">●</span> Cancellation review · <span data-modal-state>running</span></span></div>
+  <div class="overlay-backdrop" data-overlay>
+    <section class="inspector" data-inspector>
+      <header class="inspector-header">
+        <div class="inspector-title">Subagent fleet inspector <span class="subtitle">· live controls · process lifetime</span></div>
+        <div class="inspector-current"><span class="accent" data-inspector-glyph>●</span> Reviewer · <span data-inspector-state>running</span></div>
+      </header>
       <div class="inspector-body">
-        <div class="inspector-list">
-          <div class="history-separator">Live children</div>
-          <div class="inspect-row selected"><span class="dot">●</span> Cancellation review <span class="dim">· ex_02</span><div class="dim">running · pending delivery</div></div>
-          <div class="inspect-row"><span class="green">○</span> Release notes <span class="dim">· ch_3b91</span><div class="dim">idle · last completion injected</div></div>
-          <div class="history-separator">Closed children / retained executions</div>
-          <div class="inspect-row"><span class="green">✓</span> API scan <span class="dim">· ex_14</span><div class="dim">succeeded · consumed</div></div>
-          <div class="inspect-row"><span class="red">■</span> Test diagnosis <span class="dim">· ex_11</span><div class="dim">cancelled · discarded</div></div>
-        </div>
-        <div class="inspector-detail">
-          <div><b>Cancellation review</b> <span class="dim">· label</span></div>
-          <div class="dim">Child ch_7f2a · Handle h_7f2a · Execution ex_02 · fresh · inherited model</div>
-          <div class="steer-box" data-steer-box>
-            <div class="accent">Steer execution ex_02</div>
-            <input data-steer-input value="Focus on what the UI may claim before cancellation settles." />
-            <div class="row"><button class="primary" data-action="send-steer">Send</button><button data-action="close-steer">Esc cancel</button></div>
+        <aside class="roster">
+          <div class="roster-row selected" data-roster="reviewer">
+            <div class="left"><span class="arrow">›</span> <span class="glyph running">●</span> <span class="roster-label">Reviewer</span> <span class="roster-task">· Review cancellation and steering…</span></div><div class="right" data-roster-state>running</div>
           </div>
-          <div style="margin-top:14px">◆ <b>Assistant</b></div>
-          <div style="border-left:1px solid var(--border);padding-left:12px;margin:6px 0 15px" data-inspector-transcript>I’m tracing the cancellation path and checking where the parent can safely show “cancelling” versus “cancelled”.</div>
-          <div>├─ <span class="green">✓</span> <b class="tool">read</b> <span class="dim">runtime.ts</span></div>
-          <div class="dim" style="border-left:1px solid var(--border);padding:5px 0 10px 12px">settleExecution() arbitrates completion after AgentSession reports settled.</div>
-          <div>├─ <span class="green">✓</span> <b class="shell">bash</b> <span class="dim">rg "cancell" test/</span></div>
-          <div class="tool-detail dim">9 matches in 3 files. Took 0.2s.</div>
-          <div style="margin-top:16px" class="muted" data-inspector-activity>● reasoning · 4s ago</div>
-        </div>
+          <div class="roster-row" data-roster="writer">
+            <div class="left"><span class="arrow"> </span> <span class="glyph idle">○</span> <span class="roster-label">Writer</span> <span class="roster-task">· Preserve the chosen UI wording…</span></div><div class="right">idle</div>
+          </div>
+          <div class="roster-separator">process history</div>
+          <div class="roster-row" data-roster="api">
+            <div class="left"><span class="arrow"> </span> <span class="glyph succeeded">✓</span> <span class="roster-label">API scan</span> <span class="roster-task">· Check Pi TUI APIs…</span></div><div class="right">succeeded</div>
+          </div>
+          <div class="roster-row" data-roster="tests">
+            <div class="left"><span class="arrow"> </span> <span class="glyph cancelled">■</span> <span class="roster-label">Test diagnosis</span> <span class="roster-task">· Find flaky cancellation test…</span></div><div class="right">cancelled</div>
+          </div>
+        </aside>
+        <article class="detail-pane">
+          <div class="action-area" data-steer-area>
+            <div>Steer message: <input data-steer-input value="Focus on what the parent UI can claim before settlement." /></div>
+            <div class="action-help">Enter sends · Esc cancels · Backspace edits</div>
+          </div>
+          <div class="action-area" data-cancel-area>
+            <div class="yellow">Confirm cancel for execution ex_7f2a?</div>
+            <div class="action-help">Cancellation requests settlement; it does not claim a terminal outcome. Enter/Y confirms · N/Esc returns</div>
+          </div>
+          <div class="notice" data-notice hidden></div>
+          <div class="detail-head"><div class="who"><span class="accent" data-detail-glyph>●</span> Reviewer</div><div class="dim" data-detail-state>running</div></div>
+          <div class="detail-meta">foreground · live · ex_7f2a · child ch_a914 · single · fresh</div>
+          <div class="detail-stats">3.1k window · 5.7k spent · 3 tools · 50s</div>
+          <div class="detail-meta">Task: Review cancellation and steering races in the proposed minimal subagent lifecycle.</div>
+          <div class="conversation-label">Conversation <span class="sub">· assistant response</span></div>
+          <div class="conversation">
+            <div><span class="accent">◆</span> <span class="role">Assistant</span> <span class="dim">· openai/gpt-5.4</span></div>
+            <div class="rail">
+              <div class="event">I’m tracing the cancellation path and checking where the parent can safely show “cancelling” versus “cancelled”.</div>
+            </div>
+            <div class="event"><span class="faint">├─</span> <span class="green">✓</span> <span class="event-title">read</span> <span class="event-args">home/.pi/agent/extensions/subagent/runtime.ts</span></div>
+            <div class="rail">
+              <div class="event-output">Found settleExecution() and requestCancellation().</div>
+              <div class="tool-detail-lines">
+                <div class="dim">args</div>
+                <div class="muted">{"path":"home/.pi/agent/extensions/subagent/runtime.ts"}</div>
+                <div class="dim">output</div>
+                <div class="muted">418 lines read</div>
+              </div>
+              <div class="dim">12 earlier lines · x to expand</div>
+            </div>
+            <div class="event"><span class="faint">├─</span> <span class="green">✓</span> <span class="event-title blue">bash</span> <span class="event-args">rg "cancel|steer" home/.pi/agent/extensions</span></div>
+            <div class="rail">
+              <div class="event-output">runtime.ts:214 requestCancellation(execution)</div>
+              <div class="event-output">steering.ts:88 enqueueSteering(execution, message)</div>
+              <div class="tool-detail-lines">
+                <div class="dim">7 earlier matches</div>
+                <div class="muted">test/cancellation.test.ts:42 cancellation remains nonterminal until settlement</div>
+              </div>
+              <div class="dim">Took 0.2s · x to expand</div>
+            </div>
+            <div class="event"><span class="faint">└─</span> <span class="yellow" data-live-tool-glyph>●</span> <span class="event-title">reasoning</span> <span class="event-args" data-live-detail>comparing cancellation and completion arbitration</span></div>
+          </div>
+        </article>
       </div>
-      <div class="inspector-foot"><span>↑↓ child · Shift+J/K scroll · Ctrl+O tools · s steer · w wait · D cancel · r refresh · Esc close</span><span>1/4</span></div>
-    </div>
+      <footer class="inspector-footer">
+        <div class="bindings">↑/↓/j/k agent · s steer · w wait · D cancel · x/Ctrl+O tools · r refresh · Esc close</div>
+        <div>1/4</div>
+      </footer>
+    </section>
   </div>
 
-  <div class="scenario-bar"><button data-scenario="reset">Reset</button><button data-scenario="complete">Simulate completion</button></div>
-  <nav class="switcher" aria-label="Prototype variants">
-    <button data-switch="prev" aria-label="Previous variant">←</button>
-    <div class="switcher-label" data-switcher-label></div>
-    <button data-switch="next" aria-label="Next variant">→</button>
+  <nav class="scenario-switcher" aria-label="Prototype state">
+    <span class="label">State</span>
+    <button data-scenario="running">Running</button>
+    <button data-scenario="waiting">Waiting</button>
+    <button data-scenario="cancelling">Cancelling</button>
+    <button data-scenario="completed">Completed</button>
   </nav>
 
   <script>
-    const variants = [
-      { key: 'A', name: 'Parity trimmed' },
-      { key: 'B', name: 'Lifecycle ledger' },
-      { key: 'C', name: 'Inspector-first control room' },
-    ];
+    const $ = (s, root=document) => root.querySelector(s);
+    const $$ = (s, root=document) => [...root.querySelectorAll(s)];
     const state = {
-      variant: new URLSearchParams(location.search).get('variant')?.toUpperCase() || 'A',
-      execution: 'running',
-      delivery: 'pending',
+      scenario: new URLSearchParams(location.search).get('state') || 'running',
+      fleetOpen: false,
+      fleetSelection: 0,
+      overlayOpen: new URLSearchParams(location.search).get('inspect') === '1',
       toolsExpanded: false,
-      modalOpen: false,
-      steerOpen: false,
+      action: null,
+      notice: '',
     };
-    if (!variants.some(v => v.key === state.variant)) state.variant = 'A';
-
-    const all = (selector) => [...document.querySelectorAll(selector)];
-    const text = (selector, value) => all(selector).forEach(el => el.textContent = value);
-    function setVariant(key, replace = false) {
-      state.variant = key;
-      all('.variant').forEach(el => el.classList.toggle('active', el.dataset.variant === key));
-      const item = variants.find(v => v.key === key);
-      document.querySelector('[data-switcher-label]').textContent = `${key} · ${item.name}`;
-      const url = new URL(location.href);
-      url.searchParams.set('variant', key);
-      history[replace ? 'replaceState' : 'pushState']({}, '', url);
-      render();
+    const fleetKeys = ['main','reviewer','writer','api','tests'];
+    function visibleState() {
+      if (state.scenario === 'waiting') return 'running · parent waiting';
+      if (state.scenario === 'cancelling') return 'cancelling';
+      if (state.scenario === 'completed') return 'succeeded · consumed';
+      return 'running';
     }
+    function setText(selector, value) { $$(selector).forEach(el => el.textContent = value); }
     function render() {
-      all('[data-execution-state]').forEach(el => {
-        el.textContent = state.execution;
-        el.className = `state-chip ${state.execution}`;
-      });
-      text('[data-delivery]', state.delivery === 'pending' ? 'pending delivery' : state.delivery);
-      text('[data-modal-state]', state.execution);
-      document.querySelector('[data-modal]').classList.toggle('open', state.modalOpen);
-      document.querySelector('[data-steer-box]').classList.toggle('open', state.steerOpen);
-      all('[data-live-card]').forEach(el => el.classList.toggle('tools-expanded', state.toolsExpanded));
-      document.querySelector('.inspector-detail').classList.toggle('tools-expanded', state.toolsExpanded);
-      const terminal = ['succeeded', 'failed', 'cancelled'].includes(state.execution);
-      all('[data-action="steer"], [data-action="cancel"]').forEach(el => el.disabled = terminal || state.execution === 'cancelling');
-      all('[data-action="wait"]').forEach(el => el.disabled = terminal && state.delivery !== 'pending');
-      if (state.execution === 'cancelling') {
-        text('[data-activity]', '⎿ cancellation requested · waiting for child settlement');
-        text('[data-timeline-state]', 'Cancelling');
-        text('[data-timeline-detail]', 'Request acknowledged. The terminal outcome is not claimed until the child settles.');
-        text('[data-inspector-activity]', '■ cancelling · awaiting settlement');
-      } else if (state.execution === 'cancelled') {
-        text('[data-activity]', '⎿ cancelled · child closed · record retained');
-        text('[data-timeline-state]', 'Cancelled');
-        text('[data-timeline-detail]', 'The child settled after cancellation. Completion is immutable and remains inspectable.');
-        text('[data-inspector-activity]', '■ cancelled · child closed');
-      } else if (state.execution === 'succeeded') {
-        text('[data-activity]', '⎿ succeeded · final text available');
-        text('[data-timeline-state]', 'Succeeded');
-        text('[data-timeline-detail]', 'The child fully settled. A completion now exists and delivery arbitration may consume or inject it.');
-        text('[data-inspector-activity]', '✓ succeeded · completion retained');
+      const waiting = state.scenario === 'waiting';
+      const cancelling = state.scenario === 'cancelling';
+      const completed = state.scenario === 'completed';
+      const glyph = completed ? '✓' : cancelling ? '■' : '●';
+      const glyphClass = completed ? 'green' : cancelling ? 'yellow' : 'accent';
+      const status = visibleState();
+      setText('[data-card-glyph]', glyph);
+      setText('[data-inspector-glyph]', glyph);
+      setText('[data-detail-glyph]', glyph);
+      $$('[data-card-glyph],[data-inspector-glyph],[data-detail-glyph]').forEach(el => el.className = glyphClass);
+      setText('[data-inspector-state]', status);
+      setText('[data-detail-state]', status);
+      setText('[data-roster-state]', status);
+      setText('[data-fleet-state]', status);
+      if (completed) {
+        setText('[data-card-activity]', 'completed · final text consumed by waiter');
+        setText('[data-card-hint]', 'Ctrl+O full result · Ctrl+Alt+F Fleet');
+        setText('[data-card-stats]', '5 tools · 8.2k tok · 1m 34s · succeeded');
+        setText('[data-live-tool-glyph]', '✓');
+        setText('[data-live-detail]', 'Completion retained for process lifetime · delivery consumed');
+        $('[data-fleet-compact]').textContent = '1 idle · 4 completed this process · ↓ 4.0k window · 10.4k spent · ↓/← to inspect';
+      } else if (cancelling) {
+        setText('[data-card-activity]', 'cancellation requested · waiting for child settlement');
+        setText('[data-card-hint]', 'Ctrl+O live detail · Ctrl+Alt+F Fleet');
+        setText('[data-live-tool-glyph]', '■');
+        setText('[data-live-detail]', 'cancellation requested · terminal outcome not yet claimed');
+        $('[data-fleet-compact]').textContent = '1 cancelling · 1 idle · 3 completed this process · ↓ 3.1k window · 5.7k spent · ↓/← to inspect';
+      } else if (waiting) {
+        setText('[data-card-activity]', 'reasoning · parent waiting for this completion');
+        setText('[data-card-hint]', 'Waiting will consume completion · Ctrl+Alt+F Fleet');
+        setText('[data-live-tool-glyph]', '●');
+        setText('[data-live-detail]', 'parent waiting · completion will be consumed, not injected');
+        $('[data-fleet-compact]').textContent = '1 active agent · parent waiting · 1 idle · 3 completed this process · ↓ 3.1k window · 5.7k spent';
       } else {
-        text('[data-activity]', '⎿ read runtime.ts · 4s');
-        text('[data-timeline-state]', 'Reasoning');
-        text('[data-timeline-detail]', 'The cancellation request and the child’s settlement can race; control should acknowledge the request, not claim the terminal result yet.');
-        text('[data-inspector-activity]', '● reasoning · 4s ago');
+        setText('[data-card-activity]', 'bash · rg "cancel|steer" home/.pi/agent/extensions');
+        setText('[data-card-hint]', 'Ctrl+O live detail · Ctrl+Alt+F Fleet');
+        setText('[data-live-tool-glyph]', '●');
+        setText('[data-live-detail]', 'comparing cancellation and completion arbitration');
+        $('[data-fleet-compact]').textContent = '1 active agent · 1 idle · 3 completed this process · ↓ 3.1k window · 5.7k spent · ↓/← to inspect';
       }
-      const completion = state.execution === 'succeeded' ? 'final text retained' : state.execution === 'cancelled' ? 'cancelled outcome retained' : 'not settled';
-      text('[data-state-dump]', `Child       ch_7f2a  ${terminal ? 'closed' : state.execution === 'running' ? 'executing' : state.execution}\nHandle      h_7f2a   ${terminal ? 'closed' : 'open, frozen'}\nExecution   ex_02    ${state.execution}\nCompletion  ${terminal ? completion : '—        not settled'}\nDelivery    ${terminal ? state.delivery : '—        not created'}\nContext     fresh\nLifetime    parent process`);
+      $('[data-live-card]').classList.toggle('tools-expanded', state.toolsExpanded);
+      $('[data-inspector]').classList.toggle('tools-expanded', state.toolsExpanded);
+      $('[data-fleet]').classList.toggle('open', state.fleetOpen);
+      $('[data-overlay]').classList.toggle('open', state.overlayOpen);
+      $$('[data-fleet-row]').forEach((row,i) => {
+        row.classList.toggle('selected', i === state.fleetSelection);
+        $('.marker',row).textContent = i === state.fleetSelection ? '›' : ' ';
+      });
+      $('[data-steer-area]').classList.toggle('open', state.action === 'steer');
+      $('[data-cancel-area]').classList.toggle('open', state.action === 'cancel');
+      const notice = $('[data-notice]');
+      notice.hidden = !state.notice;
+      notice.textContent = state.notice;
+      $$('[data-scenario]').forEach(btn => btn.classList.toggle('active', btn.dataset.scenario === state.scenario));
+      const url = new URL(location.href);
+      url.searchParams.delete('variant');
+      url.searchParams.set('state', state.scenario);
+      if (state.overlayOpen) url.searchParams.set('inspect','1');
+      else url.searchParams.delete('inspect');
+      history.replaceState({},'',url);
     }
-    function cycle(delta) {
-      const i = variants.findIndex(v => v.key === state.variant);
-      setVariant(variants[(i + delta + variants.length) % variants.length].key);
-    }
-    function reset() {
-      Object.assign(state, { execution: 'running', delivery: 'pending', toolsExpanded: false, modalOpen: false, steerOpen: false });
+    function openInspector() {
+      state.overlayOpen = true;
+      state.action = null;
+      state.notice = '';
       render();
     }
-    function complete() {
-      state.execution = 'succeeded';
-      state.delivery = 'pending';
+    function closeInspector() {
+      state.overlayOpen = false;
+      state.action = null;
       render();
     }
-    all('[data-switch]').forEach(btn => btn.addEventListener('click', () => cycle(btn.dataset.switch === 'next' ? 1 : -1)));
-    all('[data-action]').forEach(btn => btn.addEventListener('click', () => {
-      switch (btn.dataset.action) {
-        case 'toggle-tools': state.toolsExpanded = !state.toolsExpanded; break;
-        case 'open-inspector': state.modalOpen = true; break;
-        case 'steer': state.modalOpen = true; state.steerOpen = true; break;
-        case 'close-steer': state.steerOpen = false; break;
-        case 'send-steer':
-          state.steerOpen = false;
-          document.querySelector('[data-inspector-transcript]').textContent = `Supervisor steering received: “${document.querySelector('[data-steer-input]').value}”`;
-          break;
-        case 'wait':
-          if (state.execution === 'running') state.execution = 'succeeded';
-          state.delivery = 'consumed';
-          break;
-        case 'cancel':
-          state.execution = 'cancelling';
-          setTimeout(() => { if (state.execution === 'cancelling') { state.execution = 'cancelled'; state.delivery = 'consumed'; render(); } }, 1100);
-          break;
-      }
+    function activateFleet() {
+      state.fleetOpen = true;
+      state.fleetSelection = 0;
       render();
+    }
+    function sendSteer() {
+      const value = $('[data-steer-input]').value.trim();
+      if (!value) return;
+      state.action = null;
+      state.notice = `Steering accepted for execution ex_7f2a: ${value}`;
+      render();
+    }
+    $$('[data-scenario]').forEach(btn => btn.addEventListener('click', () => { state.scenario = btn.dataset.scenario; state.notice=''; render(); }));
+    $('[data-fleet]').addEventListener('click', () => state.fleetOpen ? openInspector() : activateFleet());
+    $('[data-overlay]').addEventListener('click', e => { if (e.target === e.currentTarget) closeInspector(); });
+    $$('[data-roster]').forEach(row => row.addEventListener('click', () => {
+      $$('[data-roster]').forEach(r => r.classList.remove('selected'));
+      row.classList.add('selected');
     }));
-    document.querySelector('[data-fleet]').addEventListener('click', (event) => {
-      if (event.target.closest('button')) return;
-      event.currentTarget.classList.toggle('open');
-    });
-    all('[data-scenario]').forEach(btn => btn.addEventListener('click', () => btn.dataset.scenario === 'reset' ? reset() : complete()));
-    document.querySelector('[data-modal]').addEventListener('click', event => { if (event.target === event.currentTarget) { state.modalOpen = false; state.steerOpen = false; render(); } });
-    addEventListener('keydown', event => {
-      const editing = ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable;
-      if (!editing && event.key === 'ArrowLeft') { event.preventDefault(); cycle(-1); }
-      if (!editing && event.key === 'ArrowRight') { event.preventDefault(); cycle(1); }
-      if (event.key === 'Escape') {
-        if (state.steerOpen) state.steerOpen = false;
-        else state.modalOpen = false;
-        render();
+    document.addEventListener('keydown', e => {
+      const editing = ['INPUT','TEXTAREA'].includes(document.activeElement.tagName);
+      if (state.overlayOpen) {
+        if (state.action === 'steer') {
+          if (e.key === 'Enter') { e.preventDefault(); sendSteer(); }
+          else if (e.key === 'Escape') { e.preventDefault(); state.action=null; render(); }
+          return;
+        }
+        if (state.action === 'cancel') {
+          if (e.key === 'Enter' || e.key.toLowerCase() === 'y') { e.preventDefault(); state.action=null; state.scenario='cancelling'; state.notice='Cancellation requested; waiting for child settlement.'; render(); }
+          else if (e.key === 'Escape' || e.key.toLowerCase() === 'n') { e.preventDefault(); state.action=null; render(); }
+          return;
+        }
+        if (e.key === 'Escape' || e.key.toLowerCase() === 'q') { e.preventDefault(); closeInspector(); }
+        else if (!editing && e.key.toLowerCase() === 's' && state.scenario !== 'completed' && state.scenario !== 'cancelling') { e.preventDefault(); state.action='steer'; render(); setTimeout(()=>$('[data-steer-input]').focus(),0); }
+        else if (!editing && e.key.toLowerCase() === 'w' && state.scenario !== 'completed') { e.preventDefault(); state.scenario='waiting'; state.notice='Parent is waiting; this completion will be consumed.'; render(); }
+        else if (!editing && e.key === 'D' && state.scenario !== 'completed') { e.preventDefault(); state.action='cancel'; render(); }
+        else if (!editing && (e.key.toLowerCase() === 'x' || (e.ctrlKey && e.key.toLowerCase() === 'o'))) { e.preventDefault(); state.toolsExpanded=!state.toolsExpanded; render(); }
+        else if (!editing && e.key.toLowerCase() === 'r') { e.preventDefault(); state.notice='Status refreshed.'; render(); }
+        return;
       }
-      if (!editing && event.key.toLowerCase() === 's' && state.modalOpen && state.execution === 'running') { state.steerOpen = true; render(); }
-      if (!editing && event.key.toLowerCase() === 'w' && state.modalOpen) { if (state.execution === 'running') state.execution = 'succeeded'; state.delivery = 'consumed'; render(); }
-      if (!editing && event.key === 'D' && state.modalOpen && state.execution === 'running') { state.execution = 'cancelling'; render(); }
+      if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'f') { e.preventDefault(); openInspector(); return; }
+      if (e.ctrlKey && e.key.toLowerCase() === 'o') { e.preventDefault(); state.toolsExpanded=!state.toolsExpanded; render(); return; }
+      if (!state.fleetOpen && (e.key === 'ArrowDown' || e.key === 'ArrowLeft')) { e.preventDefault(); activateFleet(); return; }
+      if (state.fleetOpen) {
+        if (e.key === 'Escape') { e.preventDefault(); state.fleetOpen=false; render(); }
+        else if (e.key === 'ArrowDown' || e.key.toLowerCase() === 'j') { e.preventDefault(); state.fleetSelection=Math.min(fleetKeys.length-1,state.fleetSelection+1); render(); }
+        else if (e.key === 'ArrowUp' || e.key.toLowerCase() === 'k') { e.preventDefault(); if (state.fleetSelection===0) state.fleetOpen=false; else state.fleetSelection--; render(); }
+        else if (e.key === 'Enter') { e.preventDefault(); if (state.fleetSelection===0) state.fleetOpen=false; else openInspector(); render(); }
+      }
     });
-    addEventListener('popstate', () => setVariant(new URLSearchParams(location.search).get('variant')?.toUpperCase() || 'A', true));
-    setVariant(state.variant, true);
+    render();
   </script>
 </body>
 </html>

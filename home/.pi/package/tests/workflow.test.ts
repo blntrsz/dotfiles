@@ -340,7 +340,8 @@ void test("the production backend preserves one Child conversation and forwards 
   assert.equal(executions.length, 2);
   assert.equal(executions[0]?.childId, executions[1]?.childId);
   assert.deepEqual(executions.map((execution) => execution.delivery.state), ["consumed", "consumed"]);
-  assert.equal(executions[0]?.childState, "closed");
+  assert.equal(executions[0]?.childState, "idle");
+  assert.equal(executions[0]?.retained, true);
   assert.equal(executions[1]?.childState, "idle");
   assert.equal(executions[0]?.handleId, executions[1]?.handleId);
   assert.equal(executions[1]?.handleState, "idle");

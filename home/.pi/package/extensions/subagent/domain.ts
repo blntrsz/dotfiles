@@ -80,6 +80,7 @@ export interface ExecutionSnapshot {
   readonly createdAt: number;
   readonly startedAt?: number;
   readonly completedAt?: number;
+  readonly retained?: boolean;
   readonly diagnostics?: readonly string[];
   readonly omitted?: { readonly bytes: number; readonly events: number };
 }

@@ -244,7 +244,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
         const parsed = parseLaunchArguments(args);
         const request = await resolveLaunch(pi, ctx, parsed);
         const launched = runtime().registry.launch(request);
-        pi.appendEntry("subagent-launch", { executionId: launched.executionId });
+        if (ctx.mode === "tui") pi.appendEntry("subagent-launch", { executionId: launched.executionId });
         if (ctx.hasUI) ctx.ui.notify(`Child ${launched.childId} · Execution ${launched.executionId}`, "info");
       } catch (error) {
         const normalized = error instanceof SubagentError ? error : new SubagentError("child-startup-failed", error instanceof Error ? error.message : String(error));
@@ -261,7 +261,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
       const request = await resolveLaunch(pi, ctx, { ...parsed, label: "btw" });
       const launched = runtime().registry.launch(request);
       const result = await runtime().controller.wait(launched.executionId);
-      pi.appendEntry("subagent-output", { text: completionText(result.completion) });
+      if (ctx.mode === "tui") pi.appendEntry("subagent-output", { text: completionText(result.completion) });
     },
   });
 
@@ -293,12 +293,12 @@ export default function subagentExtension(pi: ExtensionAPI) {
       const matches = workflowNames.filter((name) => name.startsWith(first));
       return matches.length ? matches.map((name) => ({ value: name, label: name })) : null;
     },
-    handler: async (input, _ctx) => {
+    handler: async (input, ctx) => {
       const words = shellWords(input);
       const name = words.shift();
       if (!name) throw new SubagentError("invalid-arguments", "Usage: /run-workflow <name> [args...]");
       const result = await runtime().workflows.invoke(name, words, undefined, "command");
-      pi.appendEntry("workflow-output", { text: result.text });
+      if (ctx.mode === "tui") pi.appendEntry("workflow-output", { text: result.text });
     },
   });
 

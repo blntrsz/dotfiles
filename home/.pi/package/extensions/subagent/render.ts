@@ -115,7 +115,7 @@ export function fleetLines(snapshots: readonly ExecutionSnapshot[], width: numbe
   const executing = snapshots.filter((run) => run.executionState === "running" || run.executionState === "starting").length;
   const cancelling = snapshots.filter((run) => run.executionState === "cancelling").length;
   const idle = snapshots.filter((run) => run.childState === "idle").length;
-  const history = snapshots.filter((run) => run.childState === "closed" && isTerminalExecution(run)).length;
+  const history = snapshots.filter((run) => (run.retained || run.childState === "closed") && isTerminalExecution(run)).length;
   const pendingDelivery = snapshots.filter((run) => run.delivery.state === "pending" && run.completion).length;
   const total = snapshots.reduce((sum, run) => sum + run.usage.input + run.usage.output, 0);
   const active = executing + cancelling;
@@ -140,9 +140,10 @@ export function fleetRosterLines(
   width: number,
   theme: Theme,
 ): string[] {
-  const indexed = orderedFleetSnapshots(snapshots).map((snapshot, index) => ({ snapshot, index }));
-  const live = indexed.filter(({ snapshot }) => snapshot.childState !== "closed");
-  const history = indexed.filter(({ snapshot }) => snapshot.childState === "closed" && isTerminalExecution(snapshot));
+  const partition = partitionFleetSnapshots(snapshots);
+  const indexed = [...partition.live, ...partition.history].map((snapshot, index) => ({ snapshot, index }));
+  const live = indexed.slice(0, partition.live.length);
+  const history = indexed.slice(partition.live.length);
   const lines = [theme.fg("dim", "  ↑↓/jk select · enter inspect · esc back"), "", `${selected === 0 ? theme.fg("accent", ">") : " "} main`];
   const append = ({ snapshot, index }: (typeof indexed)[number], dim = false) => {
     const presentation = STATE_PRESENTATION[snapshot.executionState];
@@ -169,7 +170,18 @@ export function isTerminalExecution(snapshot: ExecutionSnapshot): boolean {
 
 export function orderedFleetSnapshots(snapshots: readonly ExecutionSnapshot[]): readonly ExecutionSnapshot[] {
   return Object.freeze([...snapshots].sort((a, b) => {
-    const rank = (snapshot: ExecutionSnapshot) => snapshot.childState === "closed" ? 2 : snapshot.childState === "idle" ? 1 : 0;
+    const rank = (snapshot: ExecutionSnapshot) => snapshot.retained || snapshot.childState === "closed" ? 2 : snapshot.childState === "idle" ? 1 : 0;
     return rank(a) - rank(b) || a.createdAt - b.createdAt;
   }));
+}
+
+export function partitionFleetSnapshots(snapshots: readonly ExecutionSnapshot[]): {
+  live: readonly ExecutionSnapshot[];
+  history: readonly ExecutionSnapshot[];
+} {
+  const ordered = orderedFleetSnapshots(snapshots);
+  return Object.freeze({
+    live: Object.freeze(ordered.filter((snapshot) => !snapshot.retained && snapshot.childState !== "closed")),
+    history: Object.freeze(ordered.filter((snapshot) => (snapshot.retained || snapshot.childState === "closed") && isTerminalExecution(snapshot))),
+  });
 }

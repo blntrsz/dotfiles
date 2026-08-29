@@ -146,6 +146,8 @@ void test("Fleet inspector uses the reference two-pane live layout", () => {
   assert.ok(lines.some((line) => line.includes("reviewer · running")));
   assert.match(lines.at(-2) ?? "", /agent.*scroll.*refresh.*close/);
   assert.ok(lines.every((line) => visibleWidth(line) <= 100));
+  inspector.handleInput("k");
+  assert.match(inspector.render(100).join("\n"), /main · parent[\s\S]*Parent-owned subagent runtime/);
   inspector.dispose();
 });
 

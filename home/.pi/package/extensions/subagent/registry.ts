@@ -96,6 +96,7 @@ interface RecordState {
   pendingControls: number;
   provisional?: AdapterCompletion;
   cancelRequested: boolean;
+  retained: boolean;
   consumeOnCompletion?: boolean;
   reusable?: ReusableState;
 }
@@ -195,8 +196,8 @@ export class ChildRegistry {
           throw new SubagentError("capacity-rejected", "Subagent capacity is full; no work was admitted");
         }
         for (const previous of state.records) {
-          if (previous.childState === "idle") {
-            previous.childState = "closed";
+          if (previous.childState === "idle" && !previous.retained) {
+            previous.retained = true;
             previous.activity = "retained in process history";
             this.emit(previous, "execution-retained");
           }
@@ -450,6 +451,7 @@ export class ChildRegistry {
       followUpTail: Promise.resolve(),
       pendingControls: 0,
       cancelRequested: false,
+      retained: false,
     };
   }
 
@@ -759,7 +761,9 @@ export class ChildRegistry {
       context: record.request.context ?? "fresh",
       model: record.request.model,
       thinkingLevel: record.request.thinkingLevel,
-      childState: record.childState,
+      childState: record.reusable
+        ? record.reusable.closed ? "closed" : record.reusable.active ? "executing" : "idle"
+        : record.childState,
       executionState: record.executionState,
       delivery: Object.freeze({ deliveryId: `delivery:${record.executionId}`, state: record.deliveryState, diagnostic: record.deliveryDiagnostic }),
       completion: record.completion,
@@ -769,6 +773,7 @@ export class ChildRegistry {
       createdAt: record.createdAt,
       startedAt: record.startedAt,
       completedAt: record.completedAt,
+      retained: record.retained || undefined,
       diagnostics: record.diagnostics.length ? Object.freeze([...record.diagnostics]) : undefined,
     };
     const encoded = JSON.stringify(base);

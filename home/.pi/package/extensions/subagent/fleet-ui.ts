@@ -1,7 +1,7 @@
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { isKeyRelease, matchesKey, truncateToWidth, visibleWidth, type Component, type TUI } from "@earendil-works/pi-tui";
+import { isKeyRelease, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component, type TUI } from "@earendil-works/pi-tui";
 import type { ExecutionSnapshot } from "./domain.ts";
-import { fleetLines, fleetRosterLines, isTerminalExecution, orderedFleetSnapshots } from "./render.ts";
+import { fleetLines, fleetRosterLines, isTerminalExecution, orderedFleetSnapshots, partitionFleetSnapshots } from "./render.ts";
 import { RunController, RunStore } from "./run-store.ts";
 
 const WIDGET_KEY = "subagent-fleet";
@@ -85,7 +85,7 @@ export class FleetInspector implements Component {
       return this.tui.requestRender();
     }
     if (matchesKey(data, "up") || data === "k") {
-      this.selected = Math.max(0, this.selected - 1);
+      this.selected = Math.max(-1, this.selected - 1);
       this.scroll = 0;
       return this.tui.requestRender();
     }
@@ -130,7 +130,7 @@ export class FleetInspector implements Component {
     const leftWidth = Math.max(1, Math.min(42, Math.floor(innerWidth * 0.36), innerWidth - 2));
     const rightWidth = Math.max(1, innerWidth - leftWidth - 1);
     const selected = this.snapshots[this.selected];
-    const titleState = selected ? `${selected.label} · ${selected.executionState}` : "no executions";
+    const titleState = this.selected === -1 ? "main · parent" : selected ? `${selected.label} · ${selected.executionState}` : "no executions";
     const border = (value: string) => this.theme.fg("borderAccent", value);
     const top = border(`┌${"─".repeat(leftWidth)}┬${"─".repeat(rightWidth)}┐`);
     const title = truncateToWidth(` Subagent fleet inspector · live`, leftWidth);
@@ -142,7 +142,7 @@ export class FleetInspector implements Component {
     ];
 
     const roster = this.roster(leftWidth);
-    const detail = this.detail(selected, rightWidth);
+    const detail = this.selected === -1 ? this.parentDetail() : this.detail(selected, rightWidth);
     const bodyHeight = height - 5;
     const maxScroll = Math.max(0, detail.length - bodyHeight);
     this.scroll = Math.min(this.scroll, maxScroll);
@@ -159,22 +159,37 @@ export class FleetInspector implements Component {
   }
 
   private roster(width: number): string[] {
-    const lines = [this.theme.fg("muted", "   ◉ main · parent")];
+    const parentMarker = this.selected === -1 ? this.theme.fg("accent", ">") : " ";
+    const lines = [this.theme.fg("muted", `${parentMarker}  ◉ main · parent`)];
     if (this.snapshots.length === 0) return [...lines, this.theme.fg("dim", " No current-session Children")];
-    const indexed = this.snapshots.map((snapshot, index) => ({ snapshot, index }));
-    const append = ({ snapshot, index }: (typeof indexed)[number], historical = false) => {
+    const partition = partitionFleetSnapshots(this.snapshots);
+    const append = (snapshot: ExecutionSnapshot, historical = false) => {
+      const index = this.snapshots.findIndex((candidate) => candidate.executionId === snapshot.executionId);
       const marker = index === this.selected ? this.theme.fg("accent", ">") : " ";
       const glyph = snapshot.executionState === "running" ? this.theme.fg("accent", "●") : isTerminalExecution(snapshot) ? this.theme.fg(snapshot.executionState === "succeeded" ? "success" : "error", snapshot.executionState === "succeeded" ? "✓" : "✗") : this.theme.fg("muted", "◦");
       const text = `${marker} ${glyph} ${snapshot.label} · ${snapshot.childState === "idle" ? "idle" : snapshot.executionState}`;
       lines.push(truncateToWidth(historical ? this.theme.fg("dim", text) : this.theme.bold(text), width));
     };
-    indexed.filter(({ snapshot }) => snapshot.childState !== "closed").forEach((entry) => append(entry));
-    const history = indexed.filter(({ snapshot }) => snapshot.childState === "closed" && isTerminalExecution(snapshot));
-    if (history.length) {
+    partition.live.forEach((snapshot) => append(snapshot));
+    if (partition.history.length) {
       lines.push("", this.theme.fg("dim", " Process history"));
-      history.forEach((entry) => append(entry, true));
+      partition.history.forEach((snapshot) => append(snapshot, true));
     }
     return lines;
+  }
+
+  private parentDetail(): string[] {
+    const active = this.snapshots.filter((snapshot) => !isTerminalExecution(snapshot)).length;
+    const tokens = this.snapshots.reduce((sum, snapshot) => sum + snapshot.usage.input + snapshot.usage.output, 0);
+    return [
+      ` ${this.theme.bold("main")} ${this.theme.fg("dim", "· parent")}`,
+      ` ${this.theme.fg("muted", "Parent-owned subagent runtime")}`,
+      "",
+      ` ${this.theme.fg("accent", "Fleet")}`,
+      ` ${active} active Execution${active === 1 ? "" : "s"}`,
+      ` ${this.snapshots.length} process-lifetime Execution${this.snapshots.length === 1 ? "" : "s"}`,
+      ` ${tokens} Child tokens`,
+    ];
   }
 
   private detail(snapshot: ExecutionSnapshot | undefined, width: number): string[] {
@@ -205,17 +220,7 @@ export class FleetInspector implements Component {
     if (snapshot.delivery.diagnostic) lines.push(` ${this.theme.fg("warning", `Pending delivery failure: ${snapshot.delivery.diagnostic}`)}`);
     if (snapshot.diagnostics?.length) lines.push("", ` ${this.theme.fg("accent", "Diagnostics")}`, ...snapshot.diagnostics.map((diagnostic) => ` ${this.theme.fg("warning", diagnostic)}`));
     if (snapshot.omitted) lines.push(` ${this.theme.fg("warning", `${snapshot.omitted.events} retained-history events and ${snapshot.omitted.bytes} bytes omitted`)}`);
-    return lines.flatMap((line) => {
-      if (visibleWidth(line) <= width) return [line];
-      const chunks: string[] = [];
-      let rest = line;
-      while (visibleWidth(rest) > width) {
-        chunks.push(truncateToWidth(rest, width));
-        rest = rest.slice(Math.max(1, width - 2));
-      }
-      if (rest) chunks.push(rest);
-      return chunks;
-    });
+    return lines.flatMap((line) => visibleWidth(line) <= width ? [line] : wrapTextWithAnsi(line, width));
   }
 }
 

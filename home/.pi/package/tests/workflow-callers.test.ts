@@ -43,7 +43,10 @@ void test("command, tool, and authoring callers share passive discovery and exac
     isProjectTrusted: () => true,
     modelRegistry: { runtime: {} },
   };
-  for (const handler of events.get("session_start") ?? []) await handler({}, ctx);
+  for (const mode of ["rpc", "json", "print"] as const) {
+    const headless = { ...ctx, mode, hasUI: mode === "rpc" };
+    for (const handler of events.get("session_start") ?? []) await handler({}, headless);
+  }
   assert.equal((globalThis as any).__callerWorkflowEvaluated, 0);
 
   await commands.get("workflow").handler("compare two implementations", {
@@ -55,7 +58,7 @@ void test("command, tool, and authoring callers share passive discovery and exac
   assert.match(messages[0] ?? "", /Ask once before running the exact saved source and exact arguments/);
 
   await commands.get("run-workflow").handler(`exact-output "two words" tail`, ctx);
-  assert.deepEqual(entries.at(-1), { type: "workflow-output", data: { text: "two words|tail" } });
+  assert.deepEqual(entries, [], "print mode must not append manual workflow presentation");
   assert.equal(deliveries.length, 0);
 
   const result = await tools.get("workflow").execute("call", {

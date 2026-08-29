@@ -11,9 +11,9 @@
   "hideThinkingBlock": true,
   "packages": [
     "npm:@plannotator/pi-extension",
-    "npm:pi-btw",
     "npm:pi-vim",
     "npm:pi-web-access",
-    "../package"
+    "../package",
+    "npm:pi-mcp-adapter"
   ]
 }

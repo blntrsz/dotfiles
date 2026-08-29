@@ -110,6 +110,19 @@ const setup = (selectedProfile: Profile) => Effect.gen(function* () {
     return yield* fail(`stow failed with exit code ${stowExitCode}`);
   }
 
+  const piPackageDirectory = path.join(resolvedHome, ".pi", "package");
+  const installExitCode = yield* spawner.exitCode(
+    ChildProcess.make("npm", ["install", "--omit=dev"], {
+      cwd: piPackageDirectory,
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+    }),
+  );
+  if (installExitCode !== ChildProcessSpawner.ExitCode(0)) {
+    return yield* fail(`Pi package dependency install failed with exit code ${installExitCode}`);
+  }
+
   const agentDirectory = path.join(resolvedHome, ".pi", "agent");
   const settingsLink = path.join(agentDirectory, "settings.json");
   const temporaryLink = path.join(agentDirectory, `.settings.json.${process.pid}`);

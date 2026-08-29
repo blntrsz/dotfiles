@@ -39,6 +39,8 @@ const setup = (selectedProfile: Profile) => Effect.gen(function* () {
     process.env.DOTFILES_ROOT ?? path.join(path.dirname(process.execPath), ".."),
   );
   const packageRoot = path.join(repositoryRoot, "home");
+  const cliRoot = path.join(repositoryRoot, "cli");
+  const executable = path.join(repositoryRoot, "bin", "dotfiles");
 
   for (const relativePath of installPaths) {
     const source = path.join(packageRoot, relativePath);
@@ -61,6 +63,18 @@ const setup = (selectedProfile: Profile) => Effect.gen(function* () {
   );
   if (stowVersionExitCode !== ChildProcessSpawner.ExitCode(0)) {
     return yield* fail("stow is not available");
+  }
+
+  const buildExitCode = yield* spawner.exitCode(
+    ChildProcess.make("bun", ["run", "build"], {
+      cwd: cliRoot,
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+    }),
+  );
+  if (buildExitCode !== ChildProcessSpawner.ExitCode(0)) {
+    return yield* fail(`CLI build failed with exit code ${buildExitCode}`);
   }
 
   const resolvedHome = path.resolve(home);
@@ -108,7 +122,14 @@ const setup = (selectedProfile: Profile) => Effect.gen(function* () {
     ),
   );
 
+  const localBin = path.join(resolvedHome, ".local", "bin");
+  const executableLink = path.join(localBin, "dotfiles");
+  yield* fileSystem.makeDirectory(localBin, { recursive: true });
+  yield* fileSystem.remove(executableLink, { force: true });
+  yield* fileSystem.symlink(executable, executableLink);
+
   yield* Console.log(`Linked ${packageRoot} into ${resolvedHome}`);
+  yield* Console.log(`Linked ${executable} to ${executableLink}`);
   yield* Console.log(`Selected Pi ${selectedProfile} settings for new processes`);
 });
 

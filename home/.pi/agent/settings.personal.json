@@ -9,7 +9,7 @@
     "opencode-go/glm-5.3-flash"
   ],
   "quietStartup": true,
-  "hideThinkingBlock": true,
+  "hideThinkingBlock": false,
   "packages": [
     "npm:@plannotator/pi-extension",
     "npm:pi-vim",

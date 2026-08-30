@@ -1,0 +1,29 @@
+#!/bin/sh
+set -u
+
+config_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+data_dir=$(nvim --clean --headless "+lua io.write(vim.fn.stdpath('data'))" +qa 2>/dev/null)
+runtime_dir=$(nvim --clean --headless "+lua io.write(vim.env.VIMRUNTIME)" +qa 2>/dev/null)
+
+if command -v lua-language-server >/dev/null 2>&1; then
+  lua_ls=lua-language-server
+elif [ -x "$data_dir/mason/bin/lua-language-server" ]; then
+  lua_ls="$data_dir/mason/bin/lua-language-server"
+else
+  echo "lua-language-server not found; install lua_ls with :MasonInstall lua-language-server" >&2
+  exit 127
+fi
+
+status=0
+
+NVIM_RUNTIME="$runtime_dir" NVIM_LAZY="$data_dir/lazy" \
+  "$lua_ls" \
+    --check="$config_dir" \
+    --configpath="$config_dir/.luarc-check.lua" \
+    --checklevel=Warning \
+    --check_format=pretty || status=$?
+
+# Also load the complete config to catch errors that static analysis cannot see.
+XDG_CONFIG_HOME=$(dirname -- "$config_dir") nvim --headless +qa || status=$?
+
+exit "$status"

@@ -19,6 +19,16 @@ Use `~/.pi/select-settings personal` or `~/.pi/select-settings work` to switch l
 
 Other writable state under `~/.pi/agent` is ignored by an allowlist policy. Credentials, sessions, trust decisions, caches, installed package contents, and generated dependencies must remain local.
 
+## Neovim
+
+Statically check the Lua configuration with LuaLS, then smoke-test a headless Neovim startup:
+
+```bash
+home/.config/nvim/check
+```
+
+The checker uses `lua-language-server` from `PATH` or the Mason installation. Install it with `:MasonInstall lua-language-server` if needed.
+
 ## CLI
 
 The `cli` package uses Effect v4's beta `effect/unstable/cli` API and the matching Bun platform package. Build its standalone executable into `bin`:

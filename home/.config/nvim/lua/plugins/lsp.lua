@@ -10,22 +10,20 @@ return {
   {
     "williamboman/mason.nvim",
     config = function()
-      require("mason").setup({ PATH = "prepend" })
+      require("mason").setup { PATH = "prepend" }
     end,
   },
   {
-    'neovim/nvim-lspconfig',
+    "neovim/nvim-lspconfig",
     dependencies = {
-      'williamboman/mason-lspconfig.nvim',
-      'saghen/blink.cmp',
-      'copilotlsp-nvim/copilot-lsp',
+      "saghen/blink.cmp",
     },
     config = function()
-      vim.lsp.config('*', {
-        capabilities = require('blink.cmp').get_lsp_capabilities(),
+      vim.lsp.config("*", {
+        capabilities = require("blink.cmp").get_lsp_capabilities(),
       })
 
       vim.lsp.enable(servers)
-    end
-  }
+    end,
+  },
 }

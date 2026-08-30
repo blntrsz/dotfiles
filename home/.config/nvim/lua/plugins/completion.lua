@@ -26,18 +26,19 @@ return {
     },
     signature = {
       enabled = true,
-      window = { border = 'single' },
+      window = { border = 'rounded' },
     },
     completion = {
-      list = {
-        selection = { preselect = true, auto_insert = true },
-      },
       menu = {
+        border = 'rounded',
         auto_show = function(ctx)
           return ctx.mode ~= 'cmdline'
         end,
       },
-      documentation = { auto_show = true, auto_show_delay_ms = 50, window = { border = 'single' } },
+      list = {
+        selection = { preselect = true, auto_insert = true },
+      },
+      documentation = { auto_show = true, auto_show_delay_ms = 50, window = { border = 'rounded' } },
     },
 
     appearance = {

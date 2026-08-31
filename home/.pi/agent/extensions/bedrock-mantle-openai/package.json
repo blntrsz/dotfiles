@@ -1,0 +1,13 @@
+{
+  "name": "pi-ext-bedrock-mantle-openai",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Amazon Bedrock Mantle OpenAI Responses provider for pi (port of earendil-works/pi#6216)",
+  "dependencies": {
+    "@aws-sdk/credential-provider-node": "^3.972.52",
+    "@smithy/hash-node": "^4.3.6",
+    "@smithy/signature-v4": "^5.4.6",
+    "openai": "^6.45.0"
+  }
+}

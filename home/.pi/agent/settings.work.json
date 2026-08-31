@@ -1,15 +1,20 @@
 {
   "lastChangelogVersion": "0.84.4",
+  "defaultProvider": "amazon-bedrock-mantle-openai-responses",
+  "defaultModel": "openai.gpt-5.6-luna",
+  "defaultThinkingLevel": "xhigh",
   "theme": "catppuccin-macchiato",
   "enabledModels": [
-    "openai-codex/gpt-5.6-sol",
-    "openai-codex/gpt-5.6-luna"
+    "amazon-bedrock-mantle-openai-responses/openai.gpt-5.6-sol",
+    "amazon-bedrock-mantle-openai-responses/openai.gpt-5.6-terra",
+    "amazon-bedrock-mantle-openai-responses/openai.gpt-5.6-luna",
+    "amazon-bedrock/global.anthropic.claude-sonnet-5",
+    "amazon-bedrock/global.anthropic.claude-opus-5"
   ],
   "quietStartup": true,
   "hideThinkingBlock": true,
   "packages": [
     "npm:@plannotator/pi-extension",
-    "npm:pi-vim",
     "npm:pi-web-access",
     "npm:pi-mcp-adapter",
     "../package"

@@ -17,7 +17,7 @@
     "npm:@plannotator/pi-extension",
     "npm:pi-web-access",
     "npm:pi-mcp-adapter",
-    "../package",
-    "npm:pi-vim"
+    "npm:pi-vim",
+    "npm:@tintinweb/pi-subagents"
   ]
 }

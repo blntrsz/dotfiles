@@ -12,9 +12,9 @@
   "hideThinkingBlock": false,
   "packages": [
     "npm:@plannotator/pi-extension",
-    "npm:pi-vim",
     "npm:pi-web-access",
     "npm:pi-mcp-adapter",
-    "../package"
+    "npm:pi-vim",
+    "npm:@tintinweb/pi-subagents"
   ]
 }

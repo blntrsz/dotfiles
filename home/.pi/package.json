@@ -1,7 +1,10 @@
 {
   "name": "pi",
   "dependencies": {
+    "@aws-sdk/credential-provider-node": "^3.972.82",
     "@earendil-works/pi-coding-agent": "^0.84.4",
-    "@earendil-works/pi-tui": "^0.84.4"
+    "@earendil-works/pi-tui": "^0.84.4",
+    "@smithy/hash-node": "^4.5.2",
+    "openai": "^7.8.0"
   }
 }

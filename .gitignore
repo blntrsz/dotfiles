@@ -14,3 +14,4 @@ home/.pi/agent/extensions/*
 # Local package install artifacts and Pi caches.
 home/.pi/package/node_modules/
 home/.pi/web-search-cache/
+node_modules

@@ -5,7 +5,7 @@ import {
   ChildProcessSpawner,
 } from "effect/unstable/process";
 
-const installPaths = [".config/nvim", ".pi"] as const;
+const installPaths = [".config/nvim", ".pi", ".agents/skills"] as const;
 const profiles = ["personal", "work"] as const;
 
 type Profile = (typeof profiles)[number];
@@ -110,7 +110,7 @@ const setup = (selectedProfile: Profile) => Effect.gen(function* () {
     return yield* fail(`stow failed with exit code ${stowExitCode}`);
   }
 
-  const piPackageDirectory = path.join(resolvedHome, ".pi", "package");
+  const piPackageDirectory = path.join(resolvedHome, ".pi");
   const installExitCode = yield* spawner.exitCode(
     ChildProcess.make("npm", ["install", "--omit=dev"], {
       cwd: piPackageDirectory,

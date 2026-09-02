@@ -1,13 +1,13 @@
 {
   "lastChangelogVersion": "0.84.4",
-  "defaultProvider": "amazon-bedrock-mantle-openai-responses",
-  "defaultModel": "openai.gpt-5.6-luna",
+  "defaultProvider": "amazon-bedrock",
+  "defaultModel": "global.openai.gpt-5.6-luna",
   "defaultThinkingLevel": "xhigh",
   "theme": "catppuccin-macchiato",
   "enabledModels": [
-    "amazon-bedrock-mantle-openai-responses/openai.gpt-5.6-sol",
-    "amazon-bedrock-mantle-openai-responses/openai.gpt-5.6-terra",
-    "amazon-bedrock-mantle-openai-responses/openai.gpt-5.6-luna",
+    "amazon-bedrock/global.openai.gpt-5.6-sol",
+    "amazon-bedrock/global.openai.gpt-5.6-terra",
+    "amazon-bedrock/global.openai.gpt-5.6-luna",
     "amazon-bedrock/global.anthropic.claude-sonnet-5",
     "amazon-bedrock/global.anthropic.claude-opus-5"
   ],
